@@ -1,5 +1,6 @@
 import React, {useEffect, useRef} from 'react';
 import {COURSES, ENEMIES, UPGRADE_PATTERNS, WEAPONS} from './data';
+import {recordSolvedTerm} from './progress';
 import {pickNextQuizQuestion, QuizQuestion} from './quizData';
 import {synthAudio} from './sound';
 import {
@@ -295,6 +296,7 @@ interface GameCanvasProps {
     stageNumber: number;
     endlessLoop: number;
   }) => void;
+  onTermSolved?: () => void;
   engineRef: React.MutableRefObject<GameEngineHandle | null>;
 }
 
@@ -329,10 +331,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   onHudUpdate,
   onHighScoreUpdate,
   onRunEnd,
+  onTermSolved,
   engineRef,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const gameStateRef = useRef<GameState>(gameState);
+  const onTermSolvedRef = useRef(onTermSolved);
+  onTermSolvedRef.current = onTermSolved;
   const settingsRef = useRef<GameSettings>(settings);
   const highScoreRef = useRef<number>(highScore);
   const previewCourseRef = useRef<CourseId>(previewCourseId);
@@ -1998,6 +2003,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               s.quizResult = 'correct';
               s.itemsEnabled = true;
               s.quizAnsweredCorrect += 1;
+              if (q) {
+                recordSolvedTerm(q.termId);
+                onTermSolvedRef.current?.();
+              }
               synthAudio.playQuizCorrect();
               spawnParticles(p.x, p.y, '#10B981', 24, 240, true);
               applyFlatScoreDelta(1000);
@@ -2480,6 +2489,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                   const isCorrect = choiceIdx === q.correctIndex;
                   if (isCorrect) {
                     s.quizAnsweredCorrect += 1;
+                    recordSolvedTerm(q.termId);
+                    onTermSolvedRef.current?.();
                     boss.quizResult = 'correct';
                     boss.piercingQuizActive = false;
                     boss.consecutiveQuizMisses = 0;

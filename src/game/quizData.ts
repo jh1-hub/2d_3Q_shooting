@@ -3,11 +3,14 @@ import {Category, CourseId, Subcategory, TermData} from './types';
 
 export interface QuizQuestion {
   id: string;
+  termId: number;
   category: string;
   question: string;
   choices: [string, string, string, string];
   correctIndex: 0 | 1 | 2 | 3;
 }
+
+export const ALL_QUIZ_CATEGORIES: Category[] = quizCategories;
 
 interface QuizTermEntry {
   category: Category;
@@ -31,6 +34,8 @@ const ALL_ENTRIES: QuizTermEntry[] = quizCategories.flatMap((cat) =>
     })),
   ),
 );
+
+export const TOTAL_QUIZ_TERM_COUNT = ALL_ENTRIES.length;
 
 function shuffleArray<T>(items: T[]): T[] {
   const arr = [...items];
@@ -113,6 +118,7 @@ export function pickNextQuizQuestion(
 
   return {
     id: `term-${picked.term.id}`,
+    termId: picked.term.id,
     category: `${picked.category.title} · ${picked.subcategory.title}`,
     question: `「${cleanDesc}」は何を説明したもの？`,
     choices: shuffledChoices,

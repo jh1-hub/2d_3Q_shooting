@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  Layers,
   Lock,
   Pause,
   Play,
@@ -28,6 +29,7 @@ import {
   recordPlayRun,
   recordStage8Clear,
 } from '../game/progress';
+import {TOTAL_QUIZ_TERM_COUNT} from '../game/quizData';
 import {
   getGlobalTopScore,
   readCourseScores,
@@ -45,6 +47,7 @@ import {
   UpgradePatternId,
   WeaponId,
 } from '../game/types';
+import {PartsCollectionView} from './PartsCollectionView';
 import {
   CoursePreviewSvg,
   PatternMiniDiagram,
@@ -103,6 +106,7 @@ export const GameView: React.FC = () => {
   const [selectedCourse, setSelectedCourse] = useState<CourseId>('neon_city');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [highScoresOpen, setHighScoresOpen] = useState(false);
+  const [collectionOpen, setCollectionOpen] = useState(false);
   const [highScoreCourseTab, setHighScoreCourseTab] =
     useState<CourseId>('neon_city');
   const tabStripRef = useRef<HTMLDivElement | null>(null);
@@ -313,8 +317,14 @@ export const GameView: React.FC = () => {
   useEffect(() => {
     if (gameState === 'STAGE_CLEAR') {
       setProgress(recordStage8Clear());
+    } else if (gameState === 'TITLE_MENU') {
+      setProgress(readProgress());
     }
   }, [gameState]);
+
+  const handleTermSolved = useCallback(() => {
+    setProgress(readProgress());
+  }, []);
 
   useEffect(() => {
     let timerId: number | null = null;
@@ -775,6 +785,7 @@ export const GameView: React.FC = () => {
           onHudUpdate={setHud}
           onHighScoreUpdate={setHighScore}
           onRunEnd={handleRunEnd}
+          onTermSolved={handleTermSolved}
           engineRef={engineRef}
         />
 
@@ -799,6 +810,18 @@ export const GameView: React.FC = () => {
       {/* Top-Right Quick Controls on Title Menu */}
       {gameState === 'TITLE_MENU' && (
         <div className="absolute top-3 right-3 md:top-4 md:right-4 z-20 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setCollectionOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-900/85 border border-slate-700/80 text-slate-100 hover:border-cyan-400 transition-colors text-xs font-mono font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+          >
+            <Layers className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Parts Collection</span>
+            <span className="text-slate-400 tabular-nums">
+              {progress.solvedTermIds.length}/{TOTAL_QUIZ_TERM_COUNT}
+            </span>
+          </button>
+
           <button
             type="button"
             onClick={toggleQuickMute}
@@ -904,7 +927,7 @@ export const GameView: React.FC = () => {
 
       {/* TITLE MENU WITH COURSE & PRE-STAGE AUTO-UPGRADE PATTERN SELECTOR */}
       {gameState === 'TITLE_MENU' && (
-        <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-[2px] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+        <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-[2px] flex items-center justify-center p-3 pt-16 sm:p-4 sm:pt-16 overflow-y-auto">
           <div className="w-full max-w-4xl bg-slate-900/95 border border-slate-700/80 rounded-xl p-4 md:p-6 flex flex-col gap-4 shadow-2xl my-auto">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
@@ -1077,27 +1100,8 @@ export const GameView: React.FC = () => {
                             }`}
                           />
                           {!unlocked && (
-                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-3 bg-slate-950/60 rounded">
-                              <div className="text-[10px] font-mono font-semibold text-amber-300/90 tracking-wider">
-                                解放条件
-                              </div>
-                              <div className="flex flex-wrap items-center justify-center gap-1.5">
-                                {unlockStatus.requirements.map((req, rIdx) => (
-                                  <span
-                                    key={rIdx}
-                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-mono tabular-nums ${
-                                      req.met
-                                        ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-300'
-                                        : 'bg-slate-900/90 border-slate-700 text-slate-300'
-                                    }`}
-                                  >
-                                    {req.met && (
-                                      <Check className="w-3 h-3 text-emerald-400" />
-                                    )}
-                                    {req.label}
-                                  </span>
-                                ))}
-                              </div>
+                            <div className="absolute inset-0 flex items-center justify-center bg-slate-950/60 rounded">
+                              <Lock className="w-5 h-5 text-slate-400" />
                             </div>
                           )}
                         </div>
@@ -1697,6 +1701,13 @@ export const GameView: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      {/* PARTS COLLECTION SCREEN */}
+      {collectionOpen && gameState === 'TITLE_MENU' && (
+        <PartsCollectionView
+          solvedTermCounts={progress.solvedTermCounts}
+          onClose={() => setCollectionOpen(false)}
+        />
       )}
     </div>
   );
