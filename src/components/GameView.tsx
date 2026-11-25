@@ -215,8 +215,19 @@ export const GameView: React.FC = () => {
     Record<string, boolean>
   >({});
   const [debugPanelOpen, setDebugPanelOpen] = useState(false);
+  const [debugPattern, setDebugPattern] =
+    useState<UpgradePatternId>('missile_guard');
+  const [debugDifficulty, setDebugDifficulty] =
+    useState<DifficultyMode>('normal');
   const [debugStartStage, setDebugStartStage] = useState(1);
   const [debugWeaponLevel, setDebugWeaponLevel] = useState(1);
+  const [courseSectionOpen, setCourseSectionOpen] = useState(true);
+  const [shipSectionOpen, setShipSectionOpen] = useState(() =>
+    typeof window === 'undefined'
+      ? true
+      : window.innerWidth >= 768 && window.innerHeight >= 760,
+  );
+  const [pwaGuideOpen, setPwaGuideOpen] = useState(false);
   const preMuteAudioRef = useRef<{bgm: boolean; sfx: boolean}>({
     bgm: true,
     sfx: true,
@@ -424,30 +435,23 @@ export const GameView: React.FC = () => {
 
   const startDebugRun = useCallback(() => {
     if (bgmManager.getLoadState().status !== 'ready') return;
-    const effectivePattern = isPatternUnlocked(selectedPattern, progress)
-      ? selectedPattern
-      : 'missile_guard';
-    if (effectivePattern !== selectedPattern) {
-      setSelectedPattern(effectivePattern);
-    }
     setSettingsOpen(false);
     bgmManager.restartGameTrack();
     engineRef.current?.startNewRun(
-      effectivePattern,
+      debugPattern,
       selectedCourse,
-      selectedDifficulty,
+      debugDifficulty,
       {
         startStage: debugStartStage,
         weaponPowerLevel: debugWeaponLevel,
       },
     );
   }, [
+    debugDifficulty,
+    debugPattern,
     debugStartStage,
     debugWeaponLevel,
-    progress,
     selectedCourse,
-    selectedDifficulty,
-    selectedPattern,
   ]);
 
   const toggleBgm = () => {
@@ -897,6 +901,33 @@ export const GameView: React.FC = () => {
             </span>
           </button>
 
+          {isInstalled ? (
+            <span
+              title="アプリ導入済み"
+              className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg bg-emerald-950/85 border border-emerald-500/45 text-emerald-300 text-xs font-mono font-semibold whitespace-nowrap shrink-0"
+            >
+              <Check className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">導入済</span>
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                if (isInstallable) {
+                  void install();
+                } else {
+                  setPwaGuideOpen(true);
+                }
+              }}
+              aria-label="アプリをダウンロード"
+              title="アプリをダウンロード"
+              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-lg bg-slate-900/85 border border-cyan-500/50 text-cyan-200 hover:border-cyan-300 hover:text-white transition-colors text-xs font-mono font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Download className="w-4 h-4 text-cyan-400" />
+              <span className="hidden sm:inline">アプリ保存</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={toggleQuickMute}
@@ -1026,12 +1057,12 @@ export const GameView: React.FC = () => {
 
       {/* TITLE MENU WITH COURSE & PRE-STAGE AUTO-UPGRADE PATTERN SELECTOR */}
       {gameState === 'TITLE_MENU' && (
-        <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-[2px] flex items-center justify-center p-3 pt-16 sm:p-4 sm:pt-16 overflow-y-auto">
-          <div className="w-full max-w-4xl bg-slate-900/95 border border-slate-700/80 rounded-xl p-4 md:p-6 flex flex-col gap-4 shadow-2xl my-auto">
+        <div className="absolute inset-0 bg-slate-950/75 backdrop-blur-[2px] flex items-start sm:items-center justify-center p-2.5 pt-16 sm:p-5 sm:pt-16 overflow-y-auto">
+          <div className="w-full max-w-6xl bg-slate-900/95 border border-slate-700/80 rounded-2xl p-4 sm:p-6 md:p-7 flex flex-col gap-4 md:gap-5 shadow-2xl my-auto">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <div className="text-xs font-mono text-cyan-400 mb-0.5">
-                  2157 NEO-CITY · ENDLESS HORIZONTAL SHMUP
+                  2157 NEO-CITY · QUIZ &amp; HORIZONTAL SHMUP
                 </div>
                 <h1 className="font-display text-2xl md:text-3xl font-extrabold text-white tracking-tight">
                   ARROW-01
@@ -1058,157 +1089,233 @@ export const GameView: React.FC = () => {
               </div>
             </div>
 
-            {/* 4-Course Selector */}
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2.5">
-                <span className="text-[10px] font-mono font-semibold tracking-[0.22em] text-slate-400 whitespace-nowrap">
-                  COURSE
-                </span>
-                <div className="h-px flex-1 bg-slate-800/90" />
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                {(Object.keys(COURSES) as CourseId[]).map((cid) => {
-                  const course = COURSES[cid];
-                  const active = selectedCourse === cid;
-                  return (
-                    <button
-                      key={cid}
-                      type="button"
-                      onClick={() => setSelectedCourse(cid)}
-                      className={`text-left p-2.5 rounded-lg border transition-colors cursor-pointer flex flex-col gap-1.5 ${
-                        active
-                          ? 'bg-slate-800/95 border-cyan-400'
-                          : 'bg-slate-950/60 border-slate-800 hover:border-slate-600'
-                      }`}
+            {/* Primary Learning Focus: 4-Course / Quiz Category Selector */}
+            <div className="bg-slate-950/55 border border-cyan-500/25 rounded-xl p-3 sm:p-4 flex flex-col gap-3">
+              <button
+                type="button"
+                onClick={() => setCourseSectionOpen((prev) => !prev)}
+                aria-expanded={courseSectionOpen}
+                className="w-full flex items-center justify-between gap-2.5 text-left cursor-pointer group"
+              >
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                  <span className="text-xs font-mono font-bold tracking-[0.18em] text-cyan-300 whitespace-nowrap">
+                    LEARNING COURSE
+                  </span>
+                  <span className="text-xs font-medium text-slate-200 whitespace-nowrap">
+                    出題分野・ステージを選択
+                  </span>
+                  {!courseSectionOpen && (
+                    <span
+                      className="text-xs font-semibold truncate px-2 py-0.5 rounded bg-slate-900 border border-slate-700"
+                      style={{color: COURSES[selectedCourse].accentColor}}
                     >
-                      <div className="flex items-center justify-between gap-1.5">
-                        <span
-                          className="font-mono text-[10px] font-bold"
-                          style={{color: course.accentColor}}
-                        >
-                          {course.code}
-                        </span>
-                        <span className="font-mono text-[10px] text-slate-400 truncate">
-                          {course.name}
-                        </span>
-                      </div>
-                      <CoursePreviewSvg course={course} />
-                      <div className="flex items-start gap-1.5 pt-0.5 text-[10px] leading-snug">
-                        <span className="font-mono text-slate-500 shrink-0">出題:</span>
-                        <span
-                          className="font-medium line-clamp-2"
-                          style={{color: active ? '#E2E8F0' : '#94A3B8'}}
-                        >
-                          {course.quizCategoryLabel}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+                      {COURSES[selectedCourse].code}:{' '}
+                      {COURSES[selectedCourse].quizCategoryLabel}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono text-slate-400 group-hover:text-cyan-300 transition-colors">
+                  <span className="hidden sm:inline">
+                    {courseSectionOpen ? '折りたたむ' : '開く'}
+                  </span>
+                  {courseSectionOpen ? (
+                    <ChevronDown className="w-4 h-4 text-cyan-400" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-slate-400" />
+                  )}
+                </div>
+              </button>
 
-            {/* Boundary Divider between Course & Ship Type */}
-            <div className="border-t border-slate-700/90 pt-3 flex flex-col gap-2">
-              <div className="flex items-center justify-between gap-2.5">
-                <span className="text-[10px] font-mono font-semibold tracking-[0.22em] text-slate-400 whitespace-nowrap">
-                  SHIP TYPE
-                </span>
-                <div className="h-px flex-1 bg-slate-800/90" />
-                <span className="text-[10px] font-mono tabular-nums text-slate-500 whitespace-nowrap">
-                  PLAYS: {progress.totalPlays}
-                </span>
-              </div>
-
-              {/* 4-Pattern Auto-Upgrade Selector */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {(Object.keys(UPGRADE_PATTERNS) as UpgradePatternId[]).map(
-                  (pid) => {
-                    const pat = UPGRADE_PATTERNS[pid];
-                    const unlockStatus = getPatternUnlockStatus(pid, progress);
-                    const unlocked = unlockStatus.unlocked;
-                    const active = unlocked && selectedPattern === pid;
+              {courseSectionOpen && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {(Object.keys(COURSES) as CourseId[]).map((cid) => {
+                    const course = COURSES[cid];
+                    const active = selectedCourse === cid;
                     return (
                       <button
-                        key={pid}
+                        key={cid}
                         type="button"
-                        disabled={!unlocked}
-                        onClick={() => {
-                          if (unlocked) setSelectedPattern(pid);
-                        }}
-                        className={`text-left p-2.5 rounded-lg border transition-colors flex flex-col gap-2 ${
-                          !unlocked
-                            ? 'bg-slate-950/80 border-slate-800/80 cursor-not-allowed'
-                            : active
-                              ? 'bg-slate-800/95 border-cyan-400 cursor-pointer'
-                              : 'bg-slate-950/60 border-slate-800 hover:border-slate-600 cursor-pointer'
+                        onClick={() => setSelectedCourse(cid)}
+                        className={`text-left p-3 sm:p-3.5 rounded-xl border transition-colors cursor-pointer flex flex-col gap-2.5 ${
+                          active
+                            ? 'bg-slate-800/95 border-cyan-400 ring-1 ring-cyan-400/35 shadow-lg shadow-cyan-950/40'
+                            : 'bg-slate-900/70 border-slate-800 hover:border-slate-600'
                         }`}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`font-mono text-xs font-bold ${
-                                !unlocked ? 'opacity-55' : ''
-                              }`}
-                              style={{color: pat.accent}}
-                            >
-                              {pat.name}
-                            </span>
-                            <span
-                              className={`inline-flex items-center gap-0.5 text-sky-400 font-mono text-[10px] tabular-nums ${
-                                !unlocked ? 'opacity-45' : ''
-                              }`}
-                            >
-                              {Array.from({length: pat.maxShield}).map(
-                                (_, sIdx) => (
-                                  <Shield
-                                    key={sIdx}
-                                    className="w-3 h-3 fill-sky-400/30"
-                                  />
-                                ),
-                              )}
-                            </span>
-                          </div>
-                          {unlocked ? (
-                            <div className="flex items-center gap-1">
-                              {pat.steps.slice(0, 4).map((step, i) => (
-                                <React.Fragment key={`${pid}-${i}`}>
-                                  {i > 0 && (
-                                    <span className="text-[9px] text-slate-600 font-mono">
-                                      →
-                                    </span>
-                                  )}
-                                  <div className="bg-slate-900/90 border border-slate-800 rounded px-1 py-0.5">
-                                    <UpgradeStepIcon step={step} />
-                                  </div>
-                                </React.Fragment>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-slate-700 bg-slate-900 text-[10px] font-mono font-semibold text-slate-400">
-                              <Lock className="w-3 h-3 text-amber-400/80" />
-                              LOCKED
-                            </span>
-                          )}
+                          <span
+                            className="font-mono text-[11px] font-bold tracking-wider"
+                            style={{color: course.accentColor}}
+                          >
+                            {course.code}
+                          </span>
+                          <span className="font-mono text-[10px] text-slate-400 truncate">
+                            {course.name}
+                          </span>
                         </div>
-                        <div className="relative">
-                          <PatternMiniDiagram
-                            pattern={pat}
-                            className={`w-full h-20 bg-[#050914] rounded border border-slate-800/80 ${
-                              !unlocked ? 'opacity-25' : ''
-                            }`}
-                          />
-                          {!unlocked && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-slate-950/60 rounded">
-                              <Lock className="w-5 h-5 text-slate-400" />
-                            </div>
-                          )}
+
+                        <div className="min-h-[2.75rem] flex flex-col justify-center">
+                          <div className="text-[10px] font-mono text-cyan-300/80 mb-0.5">
+                            出題分野
+                          </div>
+                          <div
+                            className="text-sm sm:text-[15px] font-bold leading-snug"
+                            style={{color: active ? '#FFFFFF' : '#E2E8F0'}}
+                          >
+                            {course.quizCategoryLabel}
+                          </div>
+                        </div>
+
+                        <CoursePreviewSvg course={course} />
+
+                        <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-0.5">
+                          <span>STAGE 1–8</span>
+                          <span className="truncate">BOSS: {course.bossName}</span>
                         </div>
                       </button>
                     );
-                  },
-                )}
-              </div>
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Ship Type Selector (Collapsible on small screens) */}
+            <div className="border-t border-slate-800 pt-3 flex flex-col gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShipSectionOpen((prev) => !prev)}
+                aria-expanded={shipSectionOpen}
+                className="w-full flex items-center justify-between gap-2.5 text-left cursor-pointer group"
+              >
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
+                  <span className="text-[11px] font-mono font-semibold tracking-[0.2em] text-slate-300 whitespace-nowrap">
+                    SHIP TYPE
+                  </span>
+                  <span
+                    className="font-mono text-xs font-bold"
+                    style={{color: UPGRADE_PATTERNS[selectedPattern].accent}}
+                  >
+                    {UPGRADE_PATTERNS[selectedPattern].name}
+                  </span>
+                  <span className="inline-flex items-center gap-0.5 text-sky-400">
+                    {Array.from({
+                      length: UPGRADE_PATTERNS[selectedPattern].maxShield,
+                    }).map((_, sIdx) => (
+                      <Shield
+                        key={sIdx}
+                        className="w-3 h-3 fill-sky-400/30"
+                      />
+                    ))}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <span className="text-[10px] font-mono tabular-nums text-slate-500 whitespace-nowrap hidden sm:inline">
+                    PLAYS: {progress.totalPlays}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-400 group-hover:text-cyan-300 transition-colors">
+                    <span>{shipSectionOpen ? '折りたたむ' : '機体を変更'}</span>
+                    {shipSectionOpen ? (
+                      <ChevronDown className="w-4 h-4 text-cyan-400" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 text-slate-400" />
+                    )}
+                  </span>
+                </div>
+              </button>
+
+              {shipSectionOpen && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {(Object.keys(UPGRADE_PATTERNS) as UpgradePatternId[]).map(
+                    (pid) => {
+                      const pat = UPGRADE_PATTERNS[pid];
+                      const unlockStatus = getPatternUnlockStatus(
+                        pid,
+                        progress,
+                      );
+                      const unlocked = unlockStatus.unlocked;
+                      const active = unlocked && selectedPattern === pid;
+                      return (
+                        <button
+                          key={pid}
+                          type="button"
+                          disabled={!unlocked}
+                          onClick={() => {
+                            if (unlocked) setSelectedPattern(pid);
+                          }}
+                          className={`text-left p-3 rounded-xl border transition-colors flex flex-col gap-2 ${
+                            !unlocked
+                              ? 'bg-slate-950/80 border-slate-800/80 cursor-not-allowed'
+                              : active
+                                ? 'bg-slate-800/95 border-cyan-400 cursor-pointer'
+                                : 'bg-slate-950/60 border-slate-800 hover:border-slate-600 cursor-pointer'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`font-mono text-xs font-bold ${
+                                  !unlocked ? 'opacity-55' : ''
+                                }`}
+                                style={{color: pat.accent}}
+                              >
+                                {pat.name}
+                              </span>
+                              <span
+                                className={`inline-flex items-center gap-0.5 text-sky-400 font-mono text-[10px] tabular-nums ${
+                                  !unlocked ? 'opacity-45' : ''
+                                }`}
+                              >
+                                {Array.from({length: pat.maxShield}).map(
+                                  (_, sIdx) => (
+                                    <Shield
+                                      key={sIdx}
+                                      className="w-3 h-3 fill-sky-400/30"
+                                    />
+                                  ),
+                                )}
+                              </span>
+                            </div>
+                            {unlocked ? (
+                              <div className="flex items-center gap-1">
+                                {pat.steps.slice(0, 4).map((step, i) => (
+                                  <React.Fragment key={`${pid}-${i}`}>
+                                    {i > 0 && (
+                                      <span className="text-[9px] text-slate-600 font-mono">
+                                        →
+                                      </span>
+                                    )}
+                                    <div className="bg-slate-900/90 border border-slate-800 rounded px-1 py-0.5">
+                                      <UpgradeStepIcon step={step} />
+                                    </div>
+                                  </React.Fragment>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-slate-700 bg-slate-900 text-[10px] font-mono font-semibold text-slate-400">
+                                <Lock className="w-3 h-3 text-amber-400/80" />
+                                LOCKED
+                              </span>
+                            )}
+                          </div>
+                          <div className="relative">
+                            <PatternMiniDiagram
+                              pattern={pat}
+                              className={`w-full h-20 bg-[#050914] rounded border border-slate-800/80 ${
+                                !unlocked ? 'opacity-25' : ''
+                              }`}
+                            />
+                            {!unlocked && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-slate-950/60 rounded">
+                                <Lock className="w-5 h-5 text-slate-400" />
+                              </div>
+                            )}
+                          </div>
+                        </button>
+                      );
+                    },
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
@@ -1618,43 +1725,6 @@ export const GameView: React.FC = () => {
                   />
                 </div>
 
-                {/* PWA App Install Section */}
-                <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-4 flex flex-col gap-2.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <div className="font-medium text-white flex items-center gap-1.5">
-                        <Smartphone className="w-4 h-4 text-cyan-400" />
-                        アプリインストール（PWA）
-                      </div>
-                      <div className="text-xs text-slate-400 mt-0.5">
-                        BGMデータ・ゲーム本体を端末に保存してオフライン対応アプリとして起動できます
-                      </div>
-                    </div>
-                    {isInstalled ? (
-                      <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-emerald-950/80 border border-emerald-500/45 text-emerald-300 text-xs font-mono font-semibold whitespace-nowrap shrink-0">
-                        <Check className="w-3.5 h-3.5" />
-                        導入済み
-                      </span>
-                    ) : isInstallable ? (
-                      <button
-                        type="button"
-                        onClick={() => void install()}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-cyan-400 hover:bg-cyan-300 text-slate-950 text-xs font-mono font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        インストール
-                      </button>
-                    ) : null}
-                  </div>
-                  {!isInstalled && !isInstallable && (
-                    <div className="text-xs text-slate-300 bg-slate-900/80 border border-slate-800 rounded-md px-3 py-2 leading-relaxed">
-                      {isIOS
-                        ? 'iOS Safariでは画面下部の共有ボタンから「ホーム画面に追加」を選択するとアプリとしてインストールできます。'
-                        : 'ブラウザのアドレスバー右端のインストールアイコン、またはメニューの「ホーム画面に追加 / アプリをインストール」から導入できます。'}
-                    </div>
-                  )}
-                </div>
-
                 {/* Collapsible Operation & Game Rules */}
                 <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-4 flex flex-col gap-2">
                   <div className="text-xs font-semibold text-white mb-0.5">
@@ -1745,6 +1815,65 @@ export const GameView: React.FC = () => {
                   {debugPanelOpen && (
                     <div className="flex flex-col gap-3.5 pt-2.5 border-t border-slate-800">
                       <div>
+                        <div className="text-xs text-slate-200 font-medium mb-1.5">
+                          使用機体（未解放機体も選択可）
+                        </div>
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {(
+                            Object.keys(UPGRADE_PATTERNS) as UpgradePatternId[]
+                          ).map((pid) => {
+                            const pat = UPGRADE_PATTERNS[pid];
+                            const active = debugPattern === pid;
+                            return (
+                              <button
+                                key={pid}
+                                type="button"
+                                onClick={() => setDebugPattern(pid)}
+                                className={`px-2 py-1.5 rounded-md border font-mono text-[11px] font-bold transition-colors cursor-pointer ${
+                                  active
+                                    ? 'bg-slate-800 border-cyan-400 text-white'
+                                    : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
+                                }`}
+                                style={active ? {color: pat.accent} : undefined}
+                              >
+                                {pat.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="text-xs text-slate-200 font-medium mb-1.5">
+                          難易度
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setDebugDifficulty('normal')}
+                            className={`py-1.5 rounded-md border font-mono text-xs font-bold transition-colors cursor-pointer ${
+                              debugDifficulty === 'normal'
+                                ? 'bg-cyan-400 border-cyan-300 text-slate-950'
+                                : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            NORMAL
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDebugDifficulty('hard')}
+                            className={`py-1.5 rounded-md border font-mono text-xs font-bold transition-colors cursor-pointer ${
+                              debugDifficulty === 'hard'
+                                ? 'bg-rose-500 border-rose-400 text-white'
+                                : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-rose-300'
+                            }`}
+                          >
+                            HARD
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
                         <div className="flex items-center justify-between mb-1.5 text-xs">
                           <span className="text-slate-200 font-medium">
                             開始ステージ
@@ -1808,8 +1937,8 @@ export const GameView: React.FC = () => {
 
                       <div className="flex items-center justify-between gap-3 pt-1">
                         <span className="text-[11px] font-mono text-slate-400">
-                          {UPGRADE_PATTERNS[selectedPattern].name} ·{' '}
-                          {selectedDifficulty.toUpperCase()}
+                          {UPGRADE_PATTERNS[debugPattern].name} ·{' '}
+                          {debugDifficulty.toUpperCase()}
                         </span>
                         <button
                           type="button"
@@ -1996,6 +2125,45 @@ export const GameView: React.FC = () => {
           solvedTermCounts={progress.solvedTermCounts}
           onClose={() => setCollectionOpen(false)}
         />
+      )}
+
+      {/* PWA INSTALL GUIDE MODAL (Home Screen fallback when browser prompt is unavailable) */}
+      {pwaGuideOpen && gameState === 'TITLE_MENU' && (
+        <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-30">
+          <div className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-xl p-5 flex flex-col gap-3.5 shadow-2xl">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <Smartphone className="w-4 h-4 text-cyan-400" />
+                <span>アプリとして保存（PWA）</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPwaGuideOpen(false)}
+                aria-label="閉じる"
+                className="p-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              BGMデータやゲーム本体を端末に保存し、ホーム画面からアプリとして起動できます。
+            </p>
+            <div className="text-xs text-slate-200 bg-slate-950/80 border border-slate-800 rounded-lg p-3 leading-relaxed">
+              {isIOS
+                ? 'iOS Safariでは画面下部の共有ボタンから「ホーム画面に追加」を選択するとアプリとしてインストールできます。'
+                : 'ブラウザのアドレスバー右端のインストールアイコン、またはメニューの「ホーム画面に追加 / アプリをインストール」から導入できます。'}
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setPwaGuideOpen(false)}
+                className="px-4 py-1.5 rounded-lg bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-mono text-xs font-bold transition-colors cursor-pointer"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
