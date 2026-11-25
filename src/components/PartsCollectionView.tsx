@@ -92,16 +92,26 @@ export const PartsCollectionView: React.FC<PartsCollectionViewProps> = ({
     null,
   );
   const [cardPageIndex, setCardPageIndex] = useState(0);
-  const [isFlipping, setIsFlipping] = useState(false);
+  const [flipPhase, setFlipPhase] = useState<
+    'idle' | 'open' | 'out-next' | 'in-next' | 'out-prev' | 'in-prev'
+  >('idle');
   const flipTimerRef = useRef<number | null>(null);
+  const flipEndTimerRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    return () => {
-      if (flipTimerRef.current !== null) {
-        window.clearTimeout(flipTimerRef.current);
-      }
-    };
+  const isFlipping = flipPhase !== 'idle';
+
+  const clearFlipTimers = useCallback(() => {
+    if (flipTimerRef.current !== null) {
+      window.clearTimeout(flipTimerRef.current);
+      flipTimerRef.current = null;
+    }
+    if (flipEndTimerRef.current !== null) {
+      window.clearTimeout(flipEndTimerRef.current);
+      flipEndTimerRef.current = null;
+    }
   }, []);
+
+  useEffect(() => clearFlipTimers, [clearFlipTimers]);
 
   const selectedCategory = useMemo(
     () =>
@@ -158,15 +168,38 @@ export const PartsCollectionView: React.FC<PartsCollectionViewProps> = ({
     );
   }, [selectedCard, unlockedCardsInView]);
 
-  const openCard = useCallback((ctx: SelectedCardContext) => {
-    if (flipTimerRef.current !== null) {
-      window.clearTimeout(flipTimerRef.current);
-      flipTimerRef.current = null;
-    }
-    setIsFlipping(false);
-    setCardPageIndex(0);
-    setSelectedCard(ctx);
-  }, []);
+  const openCard = useCallback(
+    (ctx: SelectedCardContext) => {
+      clearFlipTimers();
+      setCardPageIndex(0);
+      setSelectedCard(ctx);
+      setFlipPhase('open');
+      flipEndTimerRef.current = window.setTimeout(() => {
+        setFlipPhase('idle');
+        flipEndTimerRef.current = null;
+      }, 280);
+    },
+    [clearFlipTimers],
+  );
+
+  const switchSelectedCard = useCallback(
+    (nextCtx: SelectedCardContext, direction: 'next' | 'prev') => {
+      if (isFlipping) return;
+      clearFlipTimers();
+      setFlipPhase(direction === 'next' ? 'out-next' : 'out-prev');
+      flipTimerRef.current = window.setTimeout(() => {
+        setSelectedCard(nextCtx);
+        setCardPageIndex(0);
+        setFlipPhase(direction === 'next' ? 'in-next' : 'in-prev');
+        flipTimerRef.current = null;
+        flipEndTimerRef.current = window.setTimeout(() => {
+          setFlipPhase('idle');
+          flipEndTimerRef.current = null;
+        }, 180);
+      }, 140);
+    },
+    [clearFlipTimers, isFlipping],
+  );
 
   const triggerCardFlip = useCallback(() => {
     if (!selectedCard || isFlipping) return;
@@ -174,42 +207,53 @@ export const PartsCollectionView: React.FC<PartsCollectionViewProps> = ({
     const maxPages = getMaxCardPages(selectedCard.term);
     const unlockedPages = Math.max(1, Math.min(maxPages, solveCount));
 
-    if (flipTimerRef.current !== null) {
-      window.clearTimeout(flipTimerRef.current);
-    }
-    setIsFlipping(true);
+    clearFlipTimers();
+    setFlipPhase('out-next');
     flipTimerRef.current = window.setTimeout(() => {
       if (unlockedPages > 1) {
         setCardPageIndex((prev) => (prev + 1) % unlockedPages);
       }
-      setIsFlipping(false);
+      setFlipPhase('in-next');
       flipTimerRef.current = null;
+      flipEndTimerRef.current = window.setTimeout(() => {
+        setFlipPhase('idle');
+        flipEndTimerRef.current = null;
+      }, 180);
     }, 140);
-  }, [getSolveCount, isFlipping, selectedCard]);
+  }, [clearFlipTimers, getSolveCount, isFlipping, selectedCard]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (selectedCard) {
+          clearFlipTimers();
+          setFlipPhase('idle');
           setSelectedCard(null);
         } else {
           onClose();
         }
       } else if (selectedCard && unlockedCardsInView.length > 1) {
         if (e.key === 'ArrowLeft' && selectedIndex > 0) {
-          openCard(unlockedCardsInView[selectedIndex - 1]);
+          switchSelectedCard(unlockedCardsInView[selectedIndex - 1], 'prev');
         } else if (
           e.key === 'ArrowRight' &&
           selectedIndex >= 0 &&
           selectedIndex < unlockedCardsInView.length - 1
         ) {
-          openCard(unlockedCardsInView[selectedIndex + 1]);
+          switchSelectedCard(unlockedCardsInView[selectedIndex + 1], 'next');
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, selectedCard, selectedIndex, unlockedCardsInView]);
+  }, [
+    clearFlipTimers,
+    onClose,
+    selectedCard,
+    selectedIndex,
+    switchSelectedCard,
+    unlockedCardsInView,
+  ]);
 
   const visibleCategories = useMemo(() => {
     return ALL_QUIZ_CATEGORIES.filter(
@@ -532,19 +576,19 @@ export const PartsCollectionView: React.FC<PartsCollectionViewProps> = ({
               term.flavorTexts[safePage] ?? term.flavorTexts[0] ?? '';
 
             return (
-              <div
-                key={term.id}
-                role="dialog"
-                aria-modal="true"
-                aria-label={term.name}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  triggerCardFlip();
-                }}
-                data-flipping={isFlipping ? 'true' : 'false'}
-                className={`parts-card-flip-in parts-card-flip-stage w-full max-w-md bg-slate-900 border ${style.borderColor.split(' ')[0]} rounded-xl shadow-2xl overflow-hidden flex flex-col cursor-pointer select-none`}
-              >
-                <div className={`h-1.5 w-full ${style.accentBar}`} />
+              <div className="w-full max-w-md">
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-label={term.name}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerCardFlip();
+                  }}
+                  data-flip-phase={flipPhase}
+                  className={`parts-card-flip-stage w-full bg-slate-900 border ${style.borderColor.split(' ')[0]} rounded-xl shadow-2xl overflow-hidden flex flex-col cursor-pointer select-none`}
+                >
+                  <div className={`h-1.5 w-full ${style.accentBar}`} />
 
                 {/* Card Top Metadata & Close */}
                 <div className="px-5 pt-4 pb-3 border-b border-slate-800 flex items-start justify-between gap-3">
@@ -644,10 +688,13 @@ export const PartsCollectionView: React.FC<PartsCollectionViewProps> = ({
                   >
                     <button
                       type="button"
-                      disabled={selectedIndex <= 0}
+                      disabled={selectedIndex <= 0 || isFlipping}
                       onClick={() => {
                         if (selectedIndex > 0) {
-                          openCard(unlockedCardsInView[selectedIndex - 1]);
+                          switchSelectedCard(
+                            unlockedCardsInView[selectedIndex - 1],
+                            'prev',
+                          );
                         }
                       }}
                       className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 disabled:opacity-35 disabled:cursor-default text-slate-200 transition-colors cursor-pointer"
@@ -662,10 +709,16 @@ export const PartsCollectionView: React.FC<PartsCollectionViewProps> = ({
 
                     <button
                       type="button"
-                      disabled={selectedIndex >= unlockedCardsInView.length - 1}
+                      disabled={
+                        selectedIndex >= unlockedCardsInView.length - 1 ||
+                        isFlipping
+                      }
                       onClick={() => {
                         if (selectedIndex < unlockedCardsInView.length - 1) {
-                          openCard(unlockedCardsInView[selectedIndex + 1]);
+                          switchSelectedCard(
+                            unlockedCardsInView[selectedIndex + 1],
+                            'next',
+                          );
                         }
                       }}
                       className="inline-flex items-center gap-1 px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 disabled:opacity-35 disabled:cursor-default text-slate-200 transition-colors cursor-pointer"
@@ -675,6 +728,7 @@ export const PartsCollectionView: React.FC<PartsCollectionViewProps> = ({
                     </button>
                   </div>
                 )}
+                </div>
               </div>
             );
           })()}

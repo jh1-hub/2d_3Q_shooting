@@ -21,6 +21,8 @@ export type UpgradePatternId = 'balance' | 'spread' | 'pierce' | 'missile_guard'
 
 export type CourseId = 'neon_city' | 'foundry' | 'cyber_vault' | 'orbital';
 
+export type DifficultyMode = 'normal' | 'hard';
+
 export type BossShape = 'cruiser' | 'dreadnought' | 'mantis' | 'citadel';
 
 export type EnemyTypeId =
@@ -127,6 +129,7 @@ export interface HudSnapshot {
   combo: number;
   comboTimerRatio: number;
   courseId: CourseId;
+  difficulty: DifficultyMode;
   stageNumber: number;
   stageHalf: 1 | 2;
   itemsEnabled: boolean;
@@ -164,6 +167,7 @@ export interface CourseScoreEntry {
   patternId: UpgradePatternId;
   stageNumber: number;
   endlessLoop: number;
+  difficulty?: DifficultyMode;
   timestamp: number;
 }
 

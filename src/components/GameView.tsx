@@ -41,6 +41,7 @@ import {usePWAInstall} from '../hooks/usePWAInstall';
 import {
   CourseHighScores,
   CourseId,
+  DifficultyMode,
   GameSettings,
   GameState,
   HudSnapshot,
@@ -104,6 +105,8 @@ export const GameView: React.FC = () => {
   const [selectedPattern, setSelectedPattern] =
     useState<UpgradePatternId>('missile_guard');
   const [selectedCourse, setSelectedCourse] = useState<CourseId>('neon_city');
+  const [selectedDifficulty, setSelectedDifficulty] =
+    useState<DifficultyMode>('normal');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [highScoresOpen, setHighScoresOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
@@ -247,6 +250,7 @@ export const GameView: React.FC = () => {
     combo: 0,
     comboTimerRatio: 0,
     courseId: 'neon_city',
+    difficulty: 'normal',
     stageNumber: 1,
     stageHalf: 1,
     itemsEnabled: true,
@@ -365,12 +369,14 @@ export const GameView: React.FC = () => {
       patternId: UpgradePatternId;
       stageNumber: number;
       endlessLoop: number;
+      difficulty: DifficultyMode;
     }) => {
       const updated = recordCourseScore(result.courseId, {
         score: result.score,
         patternId: result.patternId,
         stageNumber: result.stageNumber,
         endlessLoop: result.endlessLoop,
+        difficulty: result.difficulty,
         timestamp: Date.now(),
       });
       setCourseScores(updated);
@@ -392,8 +398,12 @@ export const GameView: React.FC = () => {
       setSelectedPattern(effectivePattern);
     }
     bgmManager.restartGameTrack();
-    engineRef.current?.startNewRun(effectivePattern, selectedCourse);
-  }, [progress, selectedCourse, selectedPattern]);
+    engineRef.current?.startNewRun(
+      effectivePattern,
+      selectedCourse,
+      selectedDifficulty,
+    );
+  }, [progress, selectedCourse, selectedDifficulty, selectedPattern]);
 
   const toggleBgm = () => {
     setSettings((prev) => ({...prev, bgmEnabled: !prev.bgmEnabled}));
@@ -529,6 +539,9 @@ export const GameView: React.FC = () => {
         {/* Center: Stage / Endless & Auto-Upgrade Meter */}
         <div className="hidden sm:flex flex-col items-center w-64 md:w-72">
           <div className="flex items-center gap-2 text-xs font-mono tabular-nums text-slate-200 mb-1">
+            {hud.difficulty === 'hard' && (
+              <span className="font-bold text-rose-400">HARD</span>
+            )}
             {hud.isEndless ? (
               <span className="font-semibold text-rose-300">
                 ENDLESS · L{hud.endlessLoop} · {hud.stageHalf === 1 ? '前半' : '後半'}
@@ -573,8 +586,13 @@ export const GameView: React.FC = () => {
         {/* Right: Score, Combo & Quick Action Icons */}
         <div className="flex items-start gap-2.5 sm:gap-3 shrink-0">
           <div className="text-right font-mono tabular-nums">
-            <div className="text-sm sm:text-base font-bold text-white leading-tight">
-              {hud.score.toLocaleString()}
+            <div className="text-sm sm:text-base font-bold text-white leading-tight flex items-center justify-end gap-1.5">
+              {hud.difficulty === 'hard' && (
+                <span className="text-[10px] font-bold text-rose-400">
+                  x1.1
+                </span>
+              )}
+              <span>{hud.score.toLocaleString()}</span>
             </div>
             <div className="text-[11px] text-slate-300">
               HI {hud.highScore.toLocaleString()}
@@ -758,8 +776,8 @@ export const GameView: React.FC = () => {
                     : hud.quizResult === 'correct'
                       ? '正解！ アイテム出現あり — エリアへブースト突入！'
                       : hud.quizResult === 'timeout'
-                        ? `TIME UP！ 正解は ${hud.quizCorrectLabel}：${hud.quizCorrectChoiceText}（EXP -10% / 敵弾貫通 / アイテムなし）`
-                        : `不正解… 正解は ${hud.quizCorrectLabel}：${hud.quizCorrectChoiceText}（EXP -10% / 敵弾貫通 / アイテムなし）`}
+                        ? `TIME UP！ 正解は ${hud.quizCorrectLabel}：${hud.quizCorrectChoiceText}（EXP -15% / 敵弾貫通 / アイテムなし）`
+                        : `不正解… 正解は ${hud.quizCorrectLabel}：${hud.quizCorrectChoiceText}（EXP -15% / 敵弾貫通 / アイテムなし）`}
                 </div>
               )}
             </div>
@@ -1113,24 +1131,57 @@ export const GameView: React.FC = () => {
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
-              <div className="text-xs font-mono">
-                {bgmLoad.status === 'loading' && (
-                  <span className="text-cyan-300 tabular-nums">
-                    BGMデータをダウンロード中... {Math.round(bgmLoad.progress * 100)}%
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="inline-flex items-center p-1 rounded-lg bg-slate-950/90 border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDifficulty('normal')}
+                    className={`px-3 py-1.5 text-xs font-mono font-bold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      selectedDifficulty === 'normal'
+                        ? 'bg-cyan-400 text-slate-950'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    NORMAL
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDifficulty('hard')}
+                    className={`px-3 py-1.5 text-xs font-mono font-bold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      selectedDifficulty === 'hard'
+                        ? 'bg-rose-500 text-white'
+                        : 'text-slate-400 hover:text-rose-300'
+                    }`}
+                  >
+                    HARD
+                  </button>
+                </div>
+
+                {selectedDifficulty === 'hard' && (
+                  <span className="text-[11px] font-mono text-rose-300">
+                    常時貫通弾 · SCORE x1.1
                   </span>
                 )}
-                {bgmLoad.status === 'error' && (
-                  <div className="flex items-center gap-2 text-rose-400">
-                    <span>BGMダウンロードに失敗しました</span>
-                    <button
-                      type="button"
-                      onClick={() => void bgmManager.preloadAll()}
-                      className="px-2.5 py-1 rounded bg-rose-950/80 border border-rose-500/60 text-rose-200 hover:bg-rose-900 cursor-pointer"
-                    >
-                      再試行
-                    </button>
-                  </div>
-                )}
+
+                <div className="text-xs font-mono">
+                  {bgmLoad.status === 'loading' && (
+                    <span className="text-cyan-300 tabular-nums">
+                      BGMデータをダウンロード中... {Math.round(bgmLoad.progress * 100)}%
+                    </span>
+                  )}
+                  {bgmLoad.status === 'error' && (
+                    <div className="flex items-center gap-2 text-rose-400">
+                      <span>BGMダウンロードに失敗しました</span>
+                      <button
+                        type="button"
+                        onClick={() => void bgmManager.preloadAll()}
+                        className="px-2.5 py-1 rounded bg-rose-950/80 border border-rose-500/60 text-rose-200 hover:bg-rose-900 cursor-pointer"
+                      >
+                        再試行
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
               <button
                 type="button"
@@ -1267,6 +1318,9 @@ export const GameView: React.FC = () => {
               <div>
                 <div className="text-slate-400">到達ステージ</div>
                 <div className="text-sm font-semibold text-emerald-300 mt-0.5">
+                  {hud.difficulty === 'hard' && (
+                    <span className="text-rose-400 mr-1.5">HARD</span>
+                  )}
                   {hud.isEndless
                     ? `ENDLESS L${hud.endlessLoop} (LV ${hud.level})`
                     : `STAGE ${hud.stageNumber} (LV ${hud.level})`}
@@ -1488,28 +1542,28 @@ export const GameView: React.FC = () => {
                     },
                     {
                       id: 'shield',
-                      title: 'シールドと一撃大破',
-                      body: 'シールドが1以上残っていれば被弾を防ぎ、短時間の無敵状態になります。シールド0の状態で被弾すると連続爆発の後にGAME OVERとなります。',
+                      title: 'シールドと極小コア判定',
+                      body: 'シールドが1以上残っていれば被弾を防ぎ、短時間の無敵状態になります。シールド0時は自機中央の極小コア（4px）のみが当たり判定となり、被弾すると連続爆発の後にGAME OVERとなります。',
                     },
                     {
                       id: 'upgrade',
                       title: '武装レベルアップ・Lv10上限とシールド回復',
-                      body: 'アイテムポッドや赤い敵が落とす経験値チップで自動進化します（最大Lv10）。Lv10到達後は一定スコア達成（初回50,000点・以降段階的に上昇）ごとにシールドが1回復します。',
+                      body: '経験値チップで自動進化します（最大Lv10）。レベルアップ時のシールド獲得は一度取得済みの場合ポイントへ変換されます（初回MAXでポイントになった分は後で減少時に取得可能）。Lv10到達後は一定スコア達成ごとにシールドが1回復します。',
                     },
                     {
                       id: 'gate_quiz',
                       title: 'ステージ前半・後半の4択クイズゲート',
-                      body: '各ステージ前半・後半の突入前に30秒制限のゲート選択が発生します（コース01〜03は各専門ジャンル、04は全ジャンルから出題）。時間経過で自機は右へ進み、正解ゲートを通ると+1000点・通常通りアイテムが出現します。不正解・時間切れの場合は-1000点・取得経験値全体が10%低下（LvMAX時のシールド累計スコアは維持）し、そのエリアではアイテムが出現せず敵弾が貫通属性になります。',
+                      body: '各ステージ前半・後半の突入前に30秒制限のゲート選択が発生します（コース01〜03は各専門ジャンル、04は全ジャンルから出題）。時間経過で自機は右へ進み、正解ゲートを通ると+1000点・通常通りアイテムが出現します。不正解・時間切れの場合は-1000点・取得経験値全体が15%低下（LvMAX時のシールド累計スコアは維持）し、そのエリアではアイテムが出現せず敵弾が貫通属性になります。',
                     },
                     {
                       id: 'boss_quiz',
-                      title: 'ボス戦「（」型シールドクイズ',
-                      body: 'ボスが横断シールドを展開すると4択問題が出題されます（制限時間60秒・最低3回出題）。前方Normalショットの継続射撃でターゲットを破壊でき（別の選択肢へ照準を移すと耐久は回復）、正解するとシールドを粉砕して次のフェーズまで再出題されず攻撃が通ります。不正解・時間切れの場合は-1000点・シールド維持（本体攻撃無効＆ボス弾100%貫通、連続ミスで攻撃激化）となりますが、約15秒耐えるか攻撃を1発受ける（シールド含む）と次の問題へ再挑戦できます。',
+                      title: 'ボス戦「（」型シールドクイズ・Laser攻撃',
+                      body: 'ボスが横断シールドを展開すると4択問題が出題されます（制限時間60秒・最低3回出題）。前方Normalショットの継続射撃でターゲットを破壊でき（別の選択肢へ照準を移すと耐久は回復）、正解するとシールドを粉砕して次のフェーズまで再出題されず攻撃が通ります。不正解・時間切れの場合は-1000点・シールド維持（本体攻撃無効＆ボス弾100%貫通、連続ミスで攻撃激化）となりますが、約15秒耐えるか攻撃を1発受ける（シールド含む）と次の問題へ再挑戦できます。なおボスのLaser攻撃はNORMALではPHASE 3/3のみ、HARDではPHASE 1から発動します。',
                     },
                     {
-                      id: 'endless',
-                      title: '敵弾相殺とエンドレスモード',
-                      body: '通常時はSTAGE 1〜8の敵弾をショットで相殺できます（ゲートミス時などは貫通）。STAGE 8クリア後はタイトル帰還またはエンドレスモードへ突入でき、エンドレスでは敵弾の耐久・攻撃激化に加え、ボス正解時でも最初のボスPhase1の1%からフェーズ・ボス戦ごとに1%ずつ貫通弾率が上昇します。',
+                      id: 'difficulty',
+                      title: 'NORMAL / HARD 難易度とエンドレスモード',
+                      body: 'トップ画面でNORMALとHARDを切り替えられます。HARDでは常時敵の攻撃が貫通弾となり、獲得スコアが1.1倍になります（敵の耐久力や攻撃パターンも強化されます）。STAGE 8クリア後はエンドレスモードへ突入でき、通常モードのボス正解時でも最初のボスPhase1の1%からフェーズ・ボス戦ごとに1%ずつ貫通弾率が上昇します。',
                     },
                   ].map((rule) => {
                     const isOpen = Boolean(expandedRuleIds[rule.id]);
@@ -1668,6 +1722,11 @@ export const GameView: React.FC = () => {
                               {pat?.name ?? entry.patternId}
                             </span>
                             <span className="text-slate-400 whitespace-nowrap text-[11px] sm:text-xs">
+                              {entry.difficulty === 'hard' && (
+                                <span className="text-rose-400 font-bold mr-1.5">
+                                  HARD
+                                </span>
+                              )}
                               {entry.endlessLoop > 0
                                 ? `ENDLESS L${entry.endlessLoop}`
                                 : `STAGE ${entry.stageNumber}`}

@@ -6,6 +6,7 @@ import {synthAudio} from './sound';
 import {
   BossShape,
   CourseId,
+  DifficultyMode,
   EnemyTypeId,
   GameSettings,
   GameState,
@@ -275,7 +276,11 @@ interface FloatingText {
 }
 
 export interface GameEngineHandle {
-  startNewRun: (patternId: UpgradePatternId, courseId: CourseId) => void;
+  startNewRun: (
+    patternId: UpgradePatternId,
+    courseId: CourseId,
+    difficulty?: DifficultyMode,
+  ) => void;
   enterEndlessMode: () => void;
   finalizeRunToTitle: () => void;
 }
@@ -295,6 +300,7 @@ interface GameCanvasProps {
     patternId: UpgradePatternId;
     stageNumber: number;
     endlessLoop: number;
+    difficulty: DifficultyMode;
   }) => void;
   onTermSolved?: () => void;
   engineRef: React.MutableRefObject<GameEngineHandle | null>;
@@ -355,8 +361,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     nextId: 1,
     waveCount: 0,
     courseId: 'neon_city' as CourseId,
+    difficulty: 'normal' as DifficultyMode,
     patternId: 'missile_guard' as UpgradePatternId,
     upgradeIndex: 0,
+    claimedShieldSteps: new Set<number>(),
     lastUpgradeBanner: null as string | null,
     upgradeBannerTimer: 0,
     player: {
@@ -464,14 +472,20 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
   useEffect(() => {
     engineRef.current = {
-      startNewRun: (patternId: UpgradePatternId, courseId: CourseId) => {
+      startNewRun: (
+        patternId: UpgradePatternId,
+        courseId: CourseId,
+        difficulty: DifficultyMode = 'normal',
+      ) => {
         synthAudio.unlock();
         const s = simRef.current;
         s.nextId = 1;
         s.waveCount = 0;
         s.courseId = courseId;
+        s.difficulty = difficulty;
         s.patternId = patternId;
         s.upgradeIndex = 0;
+        s.claimedShieldSteps.clear();
         s.lastUpgradeBanner = null;
         s.upgradeBannerTimer = 0;
         const pat = UPGRADE_PATTERNS[patternId];
@@ -604,6 +618,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             patternId: s.patternId,
             stageNumber: s.stageNumber,
             endlessLoop: s.endlessLoop,
+            difficulty: s.difficulty,
           });
         }
         onStateChange('TITLE_MENU');
@@ -756,6 +771,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     let rafId = 0;
     let lastTime = performance.now();
     let hudAccumulator = 0;
+    const MAX_PARTICLES = 240;
+
+    let cachedBgCourseId: CourseId | null = null;
+    let cachedSkyGrad: CanvasGradient | null = null;
+    let cachedHorizonGrad: CanvasGradient | null = null;
+    let cachedLavaGrad: CanvasGradient | null = null;
+    const cachedShieldCurtains: {
+      normal: CanvasGradient | null;
+      overdrive: CanvasGradient | null;
+      flash: CanvasGradient | null;
+    } = {normal: null, overdrive: null, flash: null};
 
     const getCurrentCourse = () => {
       const id =
@@ -763,6 +789,40 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ? previewCourseRef.current
           : simRef.current.courseId;
       return COURSES[id];
+    };
+
+    const pushParticle = (pt: ParticleEntity) => {
+      const arr = simRef.current.particles;
+      if (arr.length < MAX_PARTICLES) {
+        arr.push(pt);
+      } else if (pt.ring) {
+        arr[Math.floor(Math.random() * arr.length)] = pt;
+      }
+    };
+
+    const updateParticlesAndTexts = (dt: number) => {
+      const pts = simRef.current.particles;
+      for (let i = pts.length - 1; i >= 0; i--) {
+        const pt = pts[i];
+        pt.life -= dt;
+        pt.x += pt.vx * dt;
+        pt.y += pt.vy * dt;
+        if (pt.ring) pt.size += 210 * dt;
+        if (pt.life <= 0) {
+          pts[i] = pts[pts.length - 1];
+          pts.pop();
+        }
+      }
+      const fts = simRef.current.floatingTexts;
+      for (let i = fts.length - 1; i >= 0; i--) {
+        const ft = fts[i];
+        ft.life -= dt;
+        ft.y -= 28 * dt;
+        if (ft.life <= 0) {
+          fts[i] = fts[fts.length - 1];
+          fts.pop();
+        }
+      }
     };
 
     const spawnParticles = (
@@ -773,9 +833,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       speed = 180,
       ring = false,
     ) => {
-      const s = simRef.current;
       if (ring) {
-        s.particles.push({
+        pushParticle({
           x,
           y,
           vx: 0,
@@ -787,7 +846,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ring: true,
         });
       }
-      for (let i = 0; i < count; i++) {
+      const s = simRef.current;
+      const room = Math.max(0, MAX_PARTICLES - s.particles.length);
+      const spawnCount = room > 0 ? Math.min(count, room) : 0;
+      for (let i = 0; i < spawnCount; i++) {
         const ang = Math.random() * Math.PI * 2;
         const spd = speed * (0.3 + Math.random() * 0.85);
         s.particles.push({
@@ -859,12 +921,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       }
     };
 
+    const getDifficultyScoreMult = () =>
+      simRef.current.difficulty === 'hard' ? 1.1 : 1;
+
+    const addFlatBonusScore = (base: number): number => {
+      const gained = Math.round(base * getDifficultyScoreMult());
+      applyFlatScoreDelta(gained);
+      return gained;
+    };
+
     const addScore = (base: number): number => {
       const s = simRef.current;
       s.combo += 1;
       s.comboTimer = 3.5;
       const mult = 1 + Math.min(s.combo * 0.1, 4.0);
-      const gained = Math.round(base * mult);
+      const gained = Math.round(base * mult * getDifficultyScoreMult());
       applyFlatScoreDelta(gained);
       return gained;
     };
@@ -873,6 +944,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       kind: UpgradeStep['kind'],
       value: number,
       weaponId?: WeaponId,
+      shieldSlotKey?: number,
     ) => {
       const s = simRef.current;
       if (kind === 'weapon_unlock' && weaponId) {
@@ -889,8 +961,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       } else if (kind === 'bullet_size') {
         s.player.bulletSizeMult += value;
       } else if (kind === 'shield') {
-        if (s.player.shield < s.player.maxShield) {
+        const alreadyClaimed =
+          shieldSlotKey !== undefined &&
+          s.claimedShieldSteps.has(shieldSlotKey);
+        if (!alreadyClaimed && s.player.shield < s.player.maxShield) {
           s.player.shield += 1;
+          if (shieldSlotKey !== undefined) {
+            s.claimedShieldSteps.add(shieldSlotKey);
+          }
         } else {
           addScore(400);
         }
@@ -903,15 +981,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const s = simRef.current;
       const pattern = UPGRADE_PATTERNS[s.patternId];
       if (s.upgradeIndex >= pattern.steps.length) return;
-      const step = pattern.steps[s.upgradeIndex];
+      const stepIdx = s.upgradeIndex;
+      const step = pattern.steps[stepIdx];
       s.upgradeIndex += 1;
 
-      applyUpgradeEffect(step.kind, step.value, step.weaponId);
+      applyUpgradeEffect(step.kind, step.value, step.weaponId, stepIdx * 2);
       if (step.extra) {
         applyUpgradeEffect(
           step.extra.kind,
           step.extra.value,
           step.extra.weaponId,
+          stepIdx * 2 + 1,
         );
       }
 
@@ -972,7 +1052,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (totalXp <= 0) return;
 
       const prevLevel = s.level;
-      let rem = Math.max(0, Math.floor(totalXp * 0.9));
+      let rem = Math.max(0, Math.floor(totalXp * 0.85));
       let newLevel = 1;
       let newReq = 40;
       while (newLevel < MAX_WEAPON_LEVEL && rem >= newReq) {
@@ -988,7 +1068,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
       if (newLevel < prevLevel) {
         rebuildLoadoutForLevel(newLevel);
-        s.lastUpgradeBanner = `PENALTY: LV.${prevLevel} → LV.${newLevel} (EXP -10%)`;
+        s.lastUpgradeBanner = `PENALTY: LV.${prevLevel} → LV.${newLevel} (EXP -15%)`;
         s.upgradeBannerTimer = 3.2;
         s.floatingTexts.push({
           x: s.player.x,
@@ -1001,7 +1081,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         s.floatingTexts.push({
           x: s.player.x,
           y: s.player.y - 64,
-          text: 'EXP -10%',
+          text: 'EXP -15%',
           color: '#FB7185',
           life: 1.8,
         });
@@ -1045,6 +1125,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         combo: s.combo,
         comboTimerRatio: s.comboTimer / 3.5,
         courseId: s.courseId,
+        difficulty: s.difficulty,
         stageNumber: s.stageNumber,
         stageHalf: s.stageHalf,
         itemsEnabled: s.itemsEnabled,
@@ -1175,6 +1256,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       s.waveCount += 1;
       const stNum = s.stageNumber;
       const endlessLoop = s.endlessLoop;
+      const attackStageNum = stNum + (s.difficulty === 'hard' ? 1 : 0);
+      const attackEndlessLoop = endlessLoop + (s.difficulty === 'hard' ? 1 : 0);
       const stageFactor = s.isEndless
         ? 2.2 + endlessLoop * 0.75 + endlessLoop * endlessLoop * 0.28
         : 1 + (stNum - 1) * 0.18 + s.elapsedTime / 210;
@@ -1192,10 +1275,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const pick = pool[Math.floor(Math.random() * pool.length)];
       const tpl = ENEMIES[pick];
 
-      const endlessExtraCount = s.isEndless ? Math.min(4, Math.floor((endlessLoop + 1) / 2)) : 0;
+      const endlessExtraCount = s.isEndless
+        ? Math.min(4, Math.floor((attackEndlessLoop + 1) / 2))
+        : 0;
       const groupCount =
         (pick === 'drone'
-          ? stNum === 1
+          ? attackStageNum === 1
             ? 3
             : 4
           : pick === 'interceptor' || pick === 'insect'
@@ -1214,10 +1299,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           : 88 + Math.random() * (LOGICAL_H - 176);
 
       const cooldownScale = s.isEndless
-        ? Math.max(0.32, 0.92 - endlessLoop * 0.12)
-        : stNum === 1
+        ? Math.max(0.32, 0.92 - attackEndlessLoop * 0.12)
+        : attackStageNum === 1
           ? 1.85
-          : stNum === 2
+          : attackStageNum === 2
             ? 1.35
             : 1.0;
 
@@ -1272,11 +1357,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           y = Math.max(52, Math.min(LOGICAL_H - 52, baseY + (i - (groupCount - 1) / 2) * 52));
         }
 
-        // 最弱の小型ドローンは通常ステージでは1発撃破(7HP)、エンドレスはループごとに強化
-        const maxHp =
+        // 最弱の小型ドローンは通常ステージでは1発撃破(7HP)、エンドレスはループごとに強化（HARDは耐久1.5倍）
+        const hardHpMult = s.difficulty === 'hard' ? 1.5 : 1;
+        const baseMaxHp =
           unitType === 'drone' && !s.isEndless
             ? 7
             : Math.max(7, Math.round(unitTpl.hp * stageFactor));
+        const maxHp = Math.round(baseMaxHp * hardHpMult);
 
         const speedMult = s.isEndless
           ? 1.08 + Math.min(0.65, endlessLoop * 0.11) + Math.random() * 0.25
@@ -1384,11 +1471,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const spawnBoss = () => {
       const s = simRef.current;
       const course = getCurrentCourse();
-      const stageTier = s.isEndless ? 8 + s.endlessLoop : s.stageNumber;
+      const stageTier =
+        (s.isEndless ? 8 + s.endlessLoop : s.stageNumber) +
+        (s.difficulty === 'hard' ? 1 : 0);
       const scale = s.isEndless
         ? 3.8 + s.endlessLoop * 1.45 + s.endlessLoop * s.endlessLoop * 0.45
         : 1 + (s.stageNumber - 1) * 0.34;
-      const maxHp = Math.round(1350 * scale);
+      const hardHpMult = s.difficulty === 'hard' ? 1.5 : 1;
+      const maxHp = Math.round(1350 * scale * hardHpMult);
       const displayName = getBossDisplayName();
       s.warningText = displayName;
       s.warningTimer = Math.max(s.warningTimer, 1.5);
@@ -1764,20 +1854,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           eb.x += eb.vx * slowDt;
           eb.y += eb.vy * slowDt;
         }
-        for (let i = s.particles.length - 1; i >= 0; i--) {
-          const pt = s.particles[i];
-          pt.life -= dt;
-          pt.x += pt.vx * dt;
-          pt.y += pt.vy * dt;
-          if (pt.ring) pt.size += 210 * dt;
-          if (pt.life <= 0) s.particles.splice(i, 1);
-        }
-        for (let i = s.floatingTexts.length - 1; i >= 0; i--) {
-          const ft = s.floatingTexts[i];
-          ft.life -= dt;
-          ft.y -= 28 * dt;
-          if (ft.life <= 0) s.floatingTexts.splice(i, 1);
-        }
+        updateParticlesAndTexts(dt);
 
         if (s.playerDyingTimer === 0) {
           if (!s.scoreRecordedForRun) {
@@ -1788,6 +1865,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               patternId: s.patternId,
               stageNumber: s.stageNumber,
               endlessLoop: s.endlessLoop,
+              difficulty: s.difficulty,
             });
           }
           emitHudNow();
@@ -1825,7 +1903,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           p.prevX = p.x;
           p.prevY = p.y;
           for (let k = 0; k < 2; k++) {
-            s.particles.push({
+            pushParticle({
               x: p.x - 24 - Math.random() * 14,
               y: p.y + (Math.random() - 0.5) * 10,
               vx: -480 - Math.random() * 260,
@@ -1851,20 +1929,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           b.y += b.vy * dt;
           if (b.age >= b.maxAge || b.x > LOGICAL_W + 200) s.bullets.splice(i, 1);
         }
-        for (let i = s.particles.length - 1; i >= 0; i--) {
-          const pt = s.particles[i];
-          pt.life -= dt;
-          pt.x += pt.vx * dt;
-          pt.y += pt.vy * dt;
-          if (pt.ring) pt.size += 210 * dt;
-          if (pt.life <= 0) s.particles.splice(i, 1);
-        }
-        for (let i = s.floatingTexts.length - 1; i >= 0; i--) {
-          const ft = s.floatingTexts[i];
-          ft.life -= dt;
-          ft.y -= 28 * dt;
-          if (ft.life <= 0) s.floatingTexts.splice(i, 1);
-        }
+        updateParticlesAndTexts(dt);
         return;
       }
 
@@ -2009,11 +2074,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               }
               synthAudio.playQuizCorrect();
               spawnParticles(p.x, p.y, '#10B981', 24, 240, true);
-              applyFlatScoreDelta(1000);
+              const quizBonus = addFlatBonusScore(1000);
               s.floatingTexts.push({
                 x: p.x,
                 y: p.y - 36,
-                text: '+1000',
+                text: `+${quizBonus}`,
                 color: '#34D399',
                 life: 1.6,
                 big: true,
@@ -2074,7 +2139,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           p.prevX = p.x;
           p.prevY = p.y;
           for (let k = 0; k < 2; k++) {
-            s.particles.push({
+            pushParticle({
               x: p.x - 24 - Math.random() * 14,
               y: p.y + (Math.random() - 0.5) * 10,
               vx: -520 - Math.random() * 280,
@@ -2104,7 +2169,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           p.x = -80 + (180 - -80) * eased;
           p.prevX = p.x;
           p.prevY = p.y;
-          s.particles.push({
+          pushParticle({
             x: p.x - 24,
             y: p.y + (Math.random() - 0.5) * 8,
             vx: -420 - Math.random() * 200,
@@ -2202,20 +2267,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             }
           }
         }
-        for (let i = s.particles.length - 1; i >= 0; i--) {
-          const pt = s.particles[i];
-          pt.life -= dt;
-          pt.x += pt.vx * dt;
-          pt.y += pt.vy * dt;
-          if (pt.ring) pt.size += 210 * dt;
-          if (pt.life <= 0) s.particles.splice(i, 1);
-        }
-        for (let i = s.floatingTexts.length - 1; i >= 0; i--) {
-          const ft = s.floatingTexts[i];
-          ft.life -= dt;
-          ft.y -= 28 * dt;
-          if (ft.life <= 0) s.floatingTexts.splice(i, 1);
-        }
+        updateParticlesAndTexts(dt);
         return;
       }
 
@@ -2346,8 +2398,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               eb.flashTimer = 0.08;
               spawnParticles(eb.x, eb.y, '#FB923C', 4, 110);
               if (eb.hp <= 0) {
-                s.enemyBullets.splice(ebIdx, 1);
-                s.score += 15;
+                s.enemyBullets[ebIdx] = s.enemyBullets[s.enemyBullets.length - 1];
+                s.enemyBullets.pop();
+                addFlatBonusScore(15);
               }
             }
           }
@@ -2369,9 +2422,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             s.spawnTimer -= dt;
             if (s.spawnTimer <= 0) {
               spawnEnemyWave();
+              const attackStageNum =
+                s.stageNumber + (s.difficulty === 'hard' ? 1 : 0);
+              const attackEndlessLoop =
+                s.endlessLoop + (s.difficulty === 'hard' ? 1 : 0);
               const baseCadence = s.isEndless
-                ? Math.max(0.32, 0.78 - s.endlessLoop * 0.08)
-                : Math.max(0.62, 1.7 - (s.stageNumber - 1) * 0.1);
+                ? Math.max(0.3, 0.78 - attackEndlessLoop * 0.08)
+                : Math.max(0.56, 1.7 - (attackStageNum - 1) * 0.1);
               s.spawnTimer = baseCadence * (0.8 + Math.random() * 0.45);
             }
 
@@ -2519,13 +2576,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                               : '#E0F2FE',
                       };
                     });
-                    for (let k = 0; k < 9; k++) {
-                      const sy = 44 + ((LOGICAL_H - 88) * k) / 8;
+                    for (let k = 0; k < 7; k++) {
+                      const sy = 44 + ((LOGICAL_H - 88) * k) / 6;
                       spawnParticles(
                         getBossShieldXAtY(sy),
                         sy,
                         k % 2 === 0 ? '#22D3EE' : '#34D399',
-                        14,
+                        7,
                         280,
                         true,
                       );
@@ -2533,12 +2590,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     synthAudio.playQuizCorrect();
                     synthAudio.playExplosion(true);
                     triggerShake(11, 0.38);
-                    spawnParticles(impactX, impactY, '#10B981', 30, 260, true);
-                    applyFlatScoreDelta(1000);
+                    spawnParticles(impactX, impactY, '#10B981', 18, 260, true);
+                    const bossQuizBonus = addFlatBonusScore(1000);
                     s.floatingTexts.push({
                       x: p.x,
                       y: p.y - 36,
-                      text: '+1000',
+                      text: `+${bossQuizBonus}`,
                       color: '#34D399',
                       life: 1.6,
                       big: true,
@@ -2614,8 +2671,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             eb.flashTimer = 0.08;
             if (eb.hp <= 0) {
               spawnParticles(eb.x, eb.y, '#FFFFFF', 4, 95);
-              s.enemyBullets.splice(ebIdx, 1);
-              s.score += 10;
+              s.enemyBullets[ebIdx] = s.enemyBullets[s.enemyBullets.length - 1];
+              s.enemyBullets.pop();
+              addFlatBonusScore(10);
             } else {
               spawnParticles(eb.x, eb.y, '#FDE047', 2, 75);
             }
@@ -2708,18 +2766,20 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       }
 
+      const attackStageNum = s.stageNumber + (s.difficulty === 'hard' ? 1 : 0);
+      const attackEndlessLoop = s.endlessLoop + (s.difficulty === 'hard' ? 1 : 0);
       const earlySpeedMult = s.isEndless
-        ? 1.15 + Math.min(0.95, s.endlessLoop * 0.16)
-        : s.stageNumber === 1
+        ? 1.15 + Math.min(0.95, attackEndlessLoop * 0.16)
+        : attackStageNum === 1
           ? 0.78
-          : s.stageNumber === 2
+          : attackStageNum === 2
             ? 0.9
             : 1.0;
       const earlyCooldownMult = s.isEndless
-        ? Math.max(0.32, 0.85 - s.endlessLoop * 0.1)
-        : s.stageNumber === 1
+        ? Math.max(0.32, 0.85 - attackEndlessLoop * 0.1)
+        : attackStageNum === 1
           ? 1.8
-          : s.stageNumber === 2
+          : attackStageNum === 2
             ? 1.35
             : 1.0;
 
@@ -2770,20 +2830,20 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           const tpl = ENEMIES[e.type];
           e.fireTimer = tpl.fireCooldown * earlyCooldownMult * (0.85 + Math.random() * 0.35);
           const angToPlayer = Math.atan2(p.y - e.y, p.x - e.x);
-          // ゲート選択ミス時は敵弾が貫通（自機弾で相殺不可）になる。通常時はエンドレスから耐久強化
-          const enemyBulletPiercing = !s.itemsEnabled;
+          // ゲート選択ミス時またはHARDモード時は敵弾が常に貫通（自機弾で相殺不可）になる
+          const enemyBulletPiercing = !s.itemsEnabled || s.difficulty === 'hard';
           const eBulletHp = enemyBulletPiercing
             ? 999
             : s.isEndless
-              ? 24 + (s.endlessLoop - 1) * 16
+              ? 24 + (attackEndlessLoop - 1) * 16
               : 1;
           const extraEndlessSpread =
-            s.isEndless && s.endlessLoop >= 2 ? [-0.22, 0, 0.22] : [0];
+            s.isEndless && attackEndlessLoop >= 2 ? [-0.22, 0, 0.22] : [0];
 
           if (e.type === 'heli') {
             const offsets = s.isEndless
               ? [-0.34, -0.17, 0, 0.17, 0.34]
-              : s.stageNumber <= 2
+              : attackStageNum <= 2
                 ? [0]
                 : [-0.26, 0, 0.26];
             for (const off of offsets) {
@@ -2909,7 +2969,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           continue;
         }
 
-        if (!isBossShieldPush && Math.hypot(e.x - p.x, e.y - p.y) < e.radius + 12) {
+        const playerEnemyHitRadius = p.shield > 0 ? 12 : 2;
+        if (
+          !isBossShieldPush &&
+          Math.hypot(e.x - p.x, e.y - p.y) < e.radius + playerEnemyHitRadius
+        ) {
           damagePlayer();
           e.hp -= 40;
         }
@@ -3107,14 +3171,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
           if (boss.quizState === 'none') {
             const bossSpdMult =
-              (s.isEndless ? 1 + Math.min(0.75, s.endlessLoop * 0.12) : 1) *
+              (s.isEndless ? 1 + Math.min(0.75, attackEndlessLoop * 0.12) : 1) *
               (1 + Math.min(0.45, boss.quizBoostTier * 0.14));
-            // 誤答時は100%貫通。エンドレスモードの正解時は最初のボスP1=1%, P2=2%, P3=3%, 2体目P1=4%...とフェーズ・ボス戦ごとに+1%ずつ貫通弾が増える
+            // HARDモードまたは誤答時は100%貫通。通常エンドレスの正解時は最初のボスP1=1%, P2=2%, P3=3%, 2体目P1=4%...とフェーズ・ボス戦ごとに+1%ずつ貫通弾が増える
             const endlessBossPierceRate = s.isEndless
               ? Math.min(1, ((s.endlessLoop - 1) * 3 + boss.phase) * 0.01)
               : 0;
             const pushBossBullet = (x: number, y: number, vx: number, vy: number, radius: number) => {
               const isPiercing =
+                s.difficulty === 'hard' ||
                 boss.piercingQuizActive ||
                 (s.isEndless && Math.random() < endlessBossPierceRate);
               const bulletHp = isPiercing ? 999 : 1;
@@ -3134,13 +3199,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
             const tierFireMult =
               (s.isEndless
-                ? Math.max(0.32, 0.56 - s.endlessLoop * 0.06)
+                ? Math.max(0.32, 0.56 - attackEndlessLoop * 0.06)
                 : Math.max(0.52, 1 - (effectiveTier - 1) * 0.06)) *
               Math.max(0.62, 1 - boss.quizBoostTier * 0.14);
             boss.fireTimer -= dt;
             if (boss.fireTimer <= 0 && boss.x <= boss.targetX + 20 && boss.shieldTimer <= 0) {
               const ang = Math.atan2(p.y - boss.y, p.x - boss.x);
-              const extraEndlessRing = s.isEndless ? Math.min(8, s.endlessLoop * 2) : 0;
+              const extraEndlessRing = s.isEndless
+                ? Math.min(8, attackEndlessLoop * 2)
+                : 0;
               if (boss.shape === 'dreadnought') {
                 if (effectivePhase === 1) {
                   boss.fireTimer = 1.15 * tierFireMult;
@@ -3275,7 +3342,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               boss.subFireTimer -= dt;
               if (boss.subFireTimer <= 0) {
                 boss.subFireTimer = s.isEndless
-                  ? Math.max(0.36, 0.85 - s.endlessLoop * 0.1)
+                  ? Math.max(0.36, 0.85 - attackEndlessLoop * 0.1)
                   : Math.max(0.68, 1.85 - (effectiveTier - 2) * 0.17);
                 const angToP = Math.atan2(p.y - boss.y, p.x - boss.x);
 
@@ -3309,7 +3376,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 }
                 // Stage 6+: 回転リアクターリングからの放射6WAY
                 if (effectiveTier >= 6) {
-                  const ringWays = s.isEndless ? 8 + Math.min(6, s.endlessLoop * 2) : 6;
+                  const ringWays = s.isEndless
+                    ? 8 + Math.min(6, attackEndlessLoop * 2)
+                    : 6;
                   for (let rIdx = 0; rIdx < ringWays; rIdx++) {
                     const ra = -boss.age * 1.6 + (rIdx * Math.PI * 2) / ringWays;
                     pushBossBullet(boss.x, boss.y, Math.cos(ra) * 235, Math.sin(ra) * 235, 7);
@@ -3336,7 +3405,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               }
             }
 
-            if (effectivePhase >= 2) {
+            // NormalはPHASE 3/3のみ、HARDはPHASE 1からLaser攻撃を行う
+            if (s.difficulty === 'hard' || boss.phase === 3) {
               boss.laserTimer -= dt;
               if (boss.laserState === 'idle' && boss.laserTimer <= 0) {
                 boss.laserState = 'telegraph';
@@ -3352,16 +3422,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                 }
               } else if (boss.laserState === 'firing') {
                 boss.laserY = boss.y;
-                if (Math.abs(p.y - boss.laserY) < 26 && p.x < boss.x) {
+                const laserHalfTol = p.shield > 0 ? 26 : 16;
+                if (Math.abs(p.y - boss.laserY) < laserHalfTol && p.x < boss.x) {
                   damagePlayer();
                 }
                 if (boss.laserTimer <= 0) {
                   boss.laserState = 'idle';
                   boss.laserTimer =
-                    (effectivePhase === 3 ? 3.4 : 4.8) *
-                    Math.max(0.7, 1 - (effectiveTier - 1) * 0.06);
+                    3.4 * Math.max(0.7, 1 - (effectiveTier - 1) * 0.06);
                 }
               }
+            } else if (boss.laserState !== 'idle') {
+              boss.laserState = 'idle';
             }
 
             if (boss.shieldTimer <= 0 && !boss.shieldIntact) {
@@ -3440,6 +3512,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       }
 
+      const playerBulletHitRadius = p.shield > 0 ? 6 : 2;
       for (let i = s.enemyBullets.length - 1; i >= 0; i--) {
         if (i >= s.enemyBullets.length) continue;
         const eb = s.enemyBullets[i];
@@ -3448,16 +3521,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         if (isBossShieldPush) {
           eb.x -= 960 * dt;
           if (eb.x < -40) {
-            s.enemyBullets.splice(i, 1);
+            s.enemyBullets[i] = s.enemyBullets[s.enemyBullets.length - 1];
+            s.enemyBullets.pop();
           }
           continue;
         }
         eb.x += eb.vx * dt;
         eb.y += eb.vy * dt;
-        if (Math.hypot(eb.x - p.x, eb.y - p.y) < eb.radius + 6) {
+        if (Math.hypot(eb.x - p.x, eb.y - p.y) < eb.radius + playerBulletHitRadius) {
           damagePlayer();
           if (i < s.enemyBullets.length && s.enemyBullets[i] === eb) {
-            s.enemyBullets.splice(i, 1);
+            s.enemyBullets[i] = s.enemyBullets[s.enemyBullets.length - 1];
+            s.enemyBullets.pop();
           }
           if (s.boss && s.boss.quizState === 'push') {
             break;
@@ -3470,7 +3545,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           eb.y < -40 ||
           eb.y > LOGICAL_H + 40
         ) {
-          s.enemyBullets.splice(i, 1);
+          s.enemyBullets[i] = s.enemyBullets[s.enemyBullets.length - 1];
+          s.enemyBullets.pop();
         }
       }
 
@@ -3527,20 +3603,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       }
 
-      for (let i = s.particles.length - 1; i >= 0; i--) {
-        const pt = s.particles[i];
-        pt.life -= dt;
-        pt.x += pt.vx * dt;
-        pt.y += pt.vy * dt;
-        if (pt.ring) pt.size += 210 * dt;
-        if (pt.life <= 0) s.particles.splice(i, 1);
-      }
-      for (let i = s.floatingTexts.length - 1; i >= 0; i--) {
-        const ft = s.floatingTexts[i];
-        ft.life -= dt;
-        ft.y -= 28 * dt;
-        if (ft.life <= 0) s.floatingTexts.splice(i, 1);
-      }
+      updateParticlesAndTexts(dt);
     };
 
     const renderScene = () => {
@@ -3549,6 +3612,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const p = s.player;
       const isBossShieldPush = Boolean(s.boss && s.boss.shieldTimer > 0);
 
+      if (cachedBgCourseId !== st.id || !cachedSkyGrad || !cachedHorizonGrad) {
+        cachedBgCourseId = st.id;
+        cachedSkyGrad = ctx.createLinearGradient(0, 0, 0, LOGICAL_H);
+        cachedSkyGrad.addColorStop(0, st.skyTop);
+        cachedSkyGrad.addColorStop(1, st.skyBottom);
+
+        cachedHorizonGrad = ctx.createLinearGradient(0, LOGICAL_H - 220, 0, LOGICAL_H);
+        cachedHorizonGrad.addColorStop(0, 'rgba(0,0,0,0)');
+        cachedHorizonGrad.addColorStop(1, `${st.horizonColor}38`);
+      }
+      if (!cachedLavaGrad) {
+        cachedLavaGrad = ctx.createLinearGradient(0, LOGICAL_H - 40, 0, LOGICAL_H);
+        cachedLavaGrad.addColorStop(0, 'rgba(249, 115, 22, 0)');
+        cachedLavaGrad.addColorStop(1, 'rgba(239, 68, 68, 0.45)');
+      }
+
       ctx.save();
       if (s.shakeTimer > 0 && s.shakeIntensity > 0) {
         const sx = (Math.random() - 0.5) * s.shakeIntensity * 2;
@@ -3556,10 +3635,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.translate(sx, sy);
       }
 
-      const skyGrad = ctx.createLinearGradient(0, 0, 0, LOGICAL_H);
-      skyGrad.addColorStop(0, st.skyTop);
-      skyGrad.addColorStop(1, st.skyBottom);
-      ctx.fillStyle = skyGrad;
+      ctx.fillStyle = cachedSkyGrad;
       ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
 
       for (const star of s.stars) {
@@ -3579,10 +3655,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       }
 
-      const hGrad = ctx.createLinearGradient(0, LOGICAL_H - 220, 0, LOGICAL_H);
-      hGrad.addColorStop(0, 'rgba(0,0,0,0)');
-      hGrad.addColorStop(1, `${st.horizonColor}38`);
-      ctx.fillStyle = hGrad;
+      ctx.fillStyle = cachedHorizonGrad;
       ctx.fillRect(0, LOGICAL_H - 220, LOGICAL_W, 220);
 
       // Course-Specific Distinct Parallax Backgrounds
@@ -3607,10 +3680,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.strokeRect(bx, by, b.w, b.h * 0.9);
         }
         // Molten floor glow
-        const lavaGrad = ctx.createLinearGradient(0, LOGICAL_H - 40, 0, LOGICAL_H);
-        lavaGrad.addColorStop(0, 'rgba(249, 115, 22, 0)');
-        lavaGrad.addColorStop(1, 'rgba(239, 68, 68, 0.45)');
-        ctx.fillStyle = lavaGrad;
+        ctx.fillStyle = cachedLavaGrad;
         ctx.fillRect(0, LOGICAL_H - 40, LOGICAL_W, 40);
       } else if (st.id === 'cyber_vault') {
         // Perspective cyber-grid ceiling & floor + floating hologram data columns
@@ -3837,11 +3907,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.stroke();
           }
 
-          // Back (right) half of the elliptical ring
+          // Back (right) half of the elliptical ring (glow pass + sharp rim, zero shadowBlur)
+          const ringWidth =
+            isAligned || isSelected || (isFeedback && isCorrectChoice) ? 4 : 2.6;
           ctx.strokeStyle = ringColor;
-          ctx.shadowColor = ringColor;
-          ctx.shadowBlur = isAligned ? 16 : 8;
-          ctx.lineWidth = isAligned || isSelected || (isFeedback && isCorrectChoice) ? 4 : 2.6;
+          ctx.globalAlpha = 0.24;
+          ctx.lineWidth = ringWidth + 5;
+          ctx.beginPath();
+          ctx.ellipse(GATE_ENTRY_X, cy, rx, ry, 0, -Math.PI * 0.5, Math.PI * 0.5);
+          ctx.stroke();
+
+          ctx.globalAlpha = 1;
+          ctx.lineWidth = ringWidth;
           ctx.beginPath();
           ctx.ellipse(GATE_ENTRY_X, cy, rx, ry, 0, -Math.PI * 0.5, Math.PI * 0.5);
           ctx.stroke();
@@ -3851,8 +3928,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             const pulse = Math.sin(s.elapsedTime * 7 + i * 0.6) * 4;
             if (isAligned) {
               const gx = GATE_ENTRY_X - 106 + pulse;
-              ctx.shadowColor = '#22D3EE';
-              ctx.shadowBlur = 12;
               ctx.fillStyle = '#E0F2FE';
               ctx.font = '800 18px "JetBrains Mono", monospace';
               ctx.textAlign = 'right';
@@ -3898,7 +3973,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         // Soft outer smooth aura circle
         ctx.strokeStyle = 'rgba(74, 222, 128, 0.42)';
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2.4;
         ctx.beginPath();
         ctx.arc(0, 0, item.radius * 1.24 * pulse, 0, Math.PI * 2);
         ctx.stroke();
@@ -3907,8 +3982,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.fillStyle = isHit ? '#BBF7D0' : '#064E3B';
         ctx.strokeStyle = isHit ? '#FFFFFF' : '#4ADE80';
         ctx.lineWidth = 2.8;
-        ctx.shadowColor = '#22C55E';
-        ctx.shadowBlur = 14;
         ctx.beginPath();
         ctx.arc(0, 0, item.radius, 0, Math.PI * 2);
         ctx.fill();
@@ -3935,8 +4008,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         const mainColor = g.isBonus ? '#4ADE80' : '#10B981';
 
         // Outer smooth oval aura
-        ctx.strokeStyle = 'rgba(52, 211, 153, 0.55)';
-        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = 'rgba(52, 211, 153, 0.52)';
+        ctx.lineWidth = 1.8;
         ctx.beginPath();
         ctx.ellipse(
           0,
@@ -3953,8 +4026,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.fillStyle = '#052E16';
         ctx.strokeStyle = mainColor;
         ctx.lineWidth = 2.2;
-        ctx.shadowColor = mainColor;
-        ctx.shadowBlur = 12;
         ctx.beginPath();
         ctx.ellipse(0, 0, 12, 9, 0, 0, Math.PI * 2);
         ctx.fill();
@@ -3996,21 +4067,23 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         const beamH = 26 * p.bulletSizeMult * (0.68 + 0.32 * str) * pulseWave;
 
         ctx.save();
-        ctx.shadowColor = '#F43F5E';
-        ctx.shadowBlur = 24;
 
-        // Outer crimson plasma corridor
-        ctx.globalAlpha = str * 0.42;
+        // Outer soft halo & crimson plasma corridor (zero shadowBlur)
+        ctx.globalAlpha = str * 0.2;
+        ctx.fillStyle = '#F43F5E';
+        ctx.fillRect(startX, p.y - beamH * 1.25, streamLen, beamH * 2.5);
+
+        ctx.globalAlpha = str * 0.44;
         ctx.fillStyle = '#F43F5E';
         ctx.fillRect(startX, p.y - beamH * 0.85, streamLen, beamH * 1.7);
 
         // Mid rose-pink sustained beam
-        ctx.globalAlpha = str * 0.65;
+        ctx.globalAlpha = str * 0.68;
         ctx.fillStyle = '#FDA4AF';
         ctx.fillRect(startX, p.y - beamH * 0.46, streamLen, beamH * 0.92);
 
         // Inner blazing white core
-        ctx.globalAlpha = str * 0.82;
+        ctx.globalAlpha = str * 0.86;
         ctx.fillStyle = '#FFFFFF';
         ctx.fillRect(startX, p.y - beamH * 0.2, streamLen, beamH * 0.4);
 
@@ -4042,8 +4115,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       for (const b of s.bullets) {
         ctx.fillStyle = b.color;
         ctx.strokeStyle = b.color;
-        ctx.shadowColor = b.color;
-        ctx.shadowBlur = 12;
 
         if (b.kind === 'laser') {
           const halfLen = b.beamHalfLen ?? 90;
@@ -4125,6 +4196,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.fillRect(-3, -1.4, 11, 2.8);
           ctx.restore();
         } else if (b.kind === 'ripple') {
+          ctx.globalAlpha = 0.3;
+          ctx.lineWidth = 7;
+          ctx.beginPath();
+          ctx.ellipse(b.x, b.y, b.radius * 0.55, b.radius, 0, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.globalAlpha = 1;
           ctx.lineWidth = 3.2;
           ctx.beginPath();
           ctx.ellipse(b.x, b.y, b.radius * 0.55, b.radius, 0, 0, Math.PI * 2);
@@ -4145,12 +4223,39 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.fillRect(-10, -1.5, 6, 3);
           ctx.restore();
         } else {
+          ctx.globalAlpha = 0.28;
+          ctx.beginPath();
+          ctx.ellipse(
+            b.x,
+            b.y,
+            b.radius * 2.35,
+            b.radius * 1.15,
+            0,
+            0,
+            Math.PI * 2,
+          );
+          ctx.fill();
+
+          ctx.globalAlpha = 1;
           ctx.beginPath();
           ctx.ellipse(
             b.x,
             b.y,
             b.radius * 1.9,
             b.radius * 0.72,
+            0,
+            0,
+            Math.PI * 2,
+          );
+          ctx.fill();
+
+          ctx.fillStyle = '#FFFFFF';
+          ctx.beginPath();
+          ctx.ellipse(
+            b.x + b.radius * 0.35,
+            b.y,
+            b.radius * 0.9,
+            b.radius * 0.32,
             0,
             0,
             Math.PI * 2,
@@ -4175,9 +4280,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         ctx.fillStyle = bodyFill;
         ctx.strokeStyle = e.isRedCarrier ? '#FEF2F2' : '#FFFFFF';
-        ctx.lineWidth = e.isRedCarrier ? 2.4 : 2;
-        ctx.shadowColor = baseColor;
-        ctx.shadowBlur = e.isRedCarrier ? 16 : 11;
+        ctx.lineWidth = e.isRedCarrier ? 2.6 : 2;
 
         if (e.type === 'drone') {
           // Sharp 4-point angular diamond craft
@@ -4350,8 +4453,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.fillStyle = boss.flashTimer > 0 ? '#FFFFFF' : '#1E293B';
         ctx.strokeStyle = bossColor;
         ctx.lineWidth = 3.5;
-        ctx.shadowColor = bossColor;
-        ctx.shadowBlur = 22;
 
         ctx.beginPath();
         if (boss.shape === 'dreadnought') {
@@ -4606,23 +4707,31 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.lineTo(LOGICAL_W + 20, 0);
           ctx.closePath();
 
-          const curtainGrad = ctx.createLinearGradient(
-            BOSS_SHIELD_EDGE_X - BOSS_SHIELD_CURVE_DEPTH,
-            0,
-            LOGICAL_W,
-            0,
-          );
-          curtainGrad.addColorStop(
-            0,
-            isFlashing
-              ? 'rgba(186, 230, 253, 0.34)'
-              : isOverdrive
-                ? 'rgba(244, 63, 94, 0.22)'
-                : 'rgba(34, 211, 238, 0.24)',
-          );
-          curtainGrad.addColorStop(0.45, 'rgba(56, 189, 248, 0.1)');
-          curtainGrad.addColorStop(1, 'rgba(14, 165, 233, 0.02)');
-          ctx.fillStyle = curtainGrad;
+          const curtainMode = isFlashing
+            ? 'flash'
+            : isOverdrive
+              ? 'overdrive'
+              : 'normal';
+          if (!cachedShieldCurtains[curtainMode]) {
+            const g = ctx.createLinearGradient(
+              BOSS_SHIELD_EDGE_X - BOSS_SHIELD_CURVE_DEPTH,
+              0,
+              LOGICAL_W,
+              0,
+            );
+            g.addColorStop(
+              0,
+              curtainMode === 'flash'
+                ? 'rgba(186, 230, 253, 0.34)'
+                : curtainMode === 'overdrive'
+                  ? 'rgba(244, 63, 94, 0.22)'
+                  : 'rgba(34, 211, 238, 0.24)',
+            );
+            g.addColorStop(0.45, 'rgba(56, 189, 248, 0.1)');
+            g.addColorStop(1, 'rgba(14, 165, 233, 0.02)');
+            cachedShieldCurtains[curtainMode] = g;
+          }
+          ctx.fillStyle = cachedShieldCurtains[curtainMode]!;
           ctx.fill();
 
           // Clipped energy scanlines inside the barrier zone
@@ -4633,36 +4742,35 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             : 'rgba(125, 211, 252, 0.16)';
           ctx.lineWidth = 1.5;
           const scanOffset = (s.elapsedTime * 90) % 28;
+          ctx.beginPath();
           for (let sy = -28 + scanOffset; sy < LOGICAL_H + 28; sy += 28) {
-            ctx.beginPath();
             ctx.moveTo(BOSS_SHIELD_EDGE_X - BOSS_SHIELD_CURVE_DEPTH - 10, sy);
             ctx.lineTo(LOGICAL_W + 10, sy);
-            ctx.stroke();
           }
+          ctx.stroke();
           ctx.restore();
 
-          // Glowing "(" Barrier Arc
+          // Glowing "(" Barrier Arc (multi-pass additive stroke, zero shadowBlur)
           ctx.globalCompositeOperation = 'lighter';
           ctx.strokeStyle = isFlashing
             ? '#BAE6FD'
             : isOverdrive
               ? '#FB7185'
               : '#22D3EE';
-          ctx.shadowColor = isOverdrive ? '#F43F5E' : '#22D3EE';
-          ctx.shadowBlur = isFlashing ? 32 : 22;
-          ctx.lineWidth = isFlashing ? 11 : 8;
+          ctx.globalAlpha = shieldAlpha * 0.24;
+          ctx.lineWidth = isFlashing ? 24 : 18;
           ctx.beginPath();
           ctx.moveTo(BOSS_SHIELD_EDGE_X, 0);
           ctx.quadraticCurveTo(ctrlX, LOGICAL_H / 2, BOSS_SHIELD_EDGE_X, LOGICAL_H);
           ctx.stroke();
 
+          ctx.globalAlpha = shieldAlpha;
+          ctx.lineWidth = isFlashing ? 11 : 8;
+          ctx.stroke();
+
           // Bright Inner Plasma Core Line
           ctx.strokeStyle = '#F0F9FF';
-          ctx.shadowBlur = 10;
           ctx.lineWidth = 2.6;
-          ctx.beginPath();
-          ctx.moveTo(BOSS_SHIELD_EDGE_X, 0);
-          ctx.quadraticCurveTo(ctrlX, LOGICAL_H / 2, BOSS_SHIELD_EDGE_X, LOGICAL_H);
           ctx.stroke();
 
           // Travelling Energy Nodes along the "(" arc
@@ -4678,7 +4786,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.restore();
         }
 
-        // Boss Shield Shatter Animation (on correct quiz answer)
+        // Boss Shield Shatter Animation (on correct quiz answer — zero shadowBlur for 60fps burst)
         if (boss.shieldShatterTimer > 0 && boss.shieldShards.length > 0) {
           const shatterAlpha = Math.max(0, Math.min(1, boss.shieldShatterTimer / 0.78));
           const ctrlX = BOSS_SHIELD_EDGE_X - BOSS_SHIELD_CURVE_DEPTH * 2;
@@ -4688,14 +4796,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
           // Expanding shockwave flash along the shattered "(" arc
           if (shatterAlpha > 0.35) {
-            ctx.globalAlpha = (shatterAlpha - 0.35) / 0.65;
-            ctx.strokeStyle = '#FFFFFF';
-            ctx.shadowColor = '#34D399';
-            ctx.shadowBlur = 30;
-            ctx.lineWidth = 14 * shatterAlpha;
+            const waveAlpha = (shatterAlpha - 0.35) / 0.65;
             ctx.beginPath();
             ctx.moveTo(BOSS_SHIELD_EDGE_X, 0);
             ctx.quadraticCurveTo(ctrlX, LOGICAL_H / 2, BOSS_SHIELD_EDGE_X, LOGICAL_H);
+
+            ctx.globalAlpha = waveAlpha * 0.32;
+            ctx.strokeStyle = '#34D399';
+            ctx.lineWidth = 28 * shatterAlpha;
+            ctx.stroke();
+
+            ctx.globalAlpha = waveAlpha;
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 12 * shatterAlpha;
             ctx.stroke();
           }
 
@@ -4708,8 +4821,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             ctx.fillStyle = shard.color;
             ctx.strokeStyle = '#FFFFFF';
             ctx.lineWidth = 1.6;
-            ctx.shadowColor = shard.color;
-            ctx.shadowBlur = 12;
             ctx.beginPath();
             ctx.moveTo(-shard.size * 0.65, -shard.size * 0.45);
             ctx.lineTo(shard.size * 0.7, -shard.size * 0.2);
@@ -4724,7 +4835,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
       }
 
-      // ENEMY BULLETS: Sharp Rotating Angular 4-Point Spikes / Diamonds (角がある形状)
+      // ENEMY BULLETS: Sharp Rotating Angular 4-Point Spikes / Diamonds (zero shadowBlur for dense bullet patterns)
       for (const eb of s.enemyBullets) {
         ctx.save();
         ctx.translate(eb.x, eb.y);
@@ -4732,7 +4843,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
         const r = eb.radius + 2.5;
         const isFlash = eb.flashTimer > 0;
-        // Outer dark / armored rim
+        // Soft outer neon halo + dark/armored rim
+        ctx.fillStyle = eb.indestructible
+          ? 'rgba(232, 121, 249, 0.24)'
+          : 'rgba(255, 46, 84, 0.22)';
+        ctx.beginPath();
+        ctx.arc(0, 0, r + 4.5, 0, Math.PI * 2);
+        ctx.fill();
+
         ctx.fillStyle = eb.indestructible ? '#581C87' : '#1E060C';
         ctx.strokeStyle = eb.indestructible ? '#E879F9' : 'transparent';
         ctx.lineWidth = eb.indestructible ? 1.8 : 0;
@@ -4754,8 +4872,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           : eb.indestructible
             ? '#D946EF'
             : '#FF2E54';
-        ctx.shadowColor = eb.indestructible ? '#E879F9' : '#FF2E54';
-        ctx.shadowBlur = eb.indestructible ? 14 : 10;
         ctx.beginPath();
         for (let k = 0; k < 8; k++) {
           const rad = k % 2 === 0 ? r : r * 0.44;
@@ -4796,8 +4912,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.fillStyle = '#FB923C';
           ctx.strokeStyle = '#FFFFFF';
           ctx.lineWidth = 1.4;
-          ctx.shadowColor = '#FB923C';
-          ctx.shadowBlur = 10;
           ctx.beginPath();
           ctx.moveTo(9, 0);
           ctx.lineTo(-6, -5);
@@ -4820,8 +4934,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.fillStyle = '#0891B2';
         ctx.strokeStyle = '#67E8F9';
         ctx.lineWidth = 2;
-        ctx.shadowColor = '#22D3EE';
-        ctx.shadowBlur = 10;
         ctx.beginPath();
         ctx.moveTo(10, 0);
         ctx.lineTo(-7, -7);
@@ -4860,9 +4972,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         const flameLen = isBoostingOut
           ? 76 + Math.sin(s.elapsedTime * 68) * 18
           : 18 + Math.sin(s.elapsedTime * 48) * 6;
+
+        ctx.fillStyle = 'rgba(34, 211, 238, 0.28)';
+        ctx.beginPath();
+        ctx.moveTo(-18, isBoostingOut ? -13 : -8);
+        ctx.lineTo(-18 - flameLen * 1.25, 0);
+        ctx.lineTo(-18, isBoostingOut ? 13 : 8);
+        ctx.closePath();
+        ctx.fill();
+
         ctx.fillStyle = isBoostingOut ? '#67E8F9' : '#22D3EE';
-        ctx.shadowColor = '#22D3EE';
-        ctx.shadowBlur = isBoostingOut ? 26 : 14;
         ctx.beginPath();
         ctx.moveTo(-18, isBoostingOut ? -9 : -5);
         ctx.lineTo(-18 - flameLen, 0);
@@ -4903,10 +5022,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         ctx.ellipse(5, 0, 8, 3.2, 0, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = '#FFFFFF';
-        ctx.beginPath();
-        ctx.arc(-2, 0, 3.2, 0, Math.PI * 2);
-        ctx.fill();
+        if (p.shield === 0) {
+          // シールド0時は中央の4pxコア当たり判定を明確に可視化
+          ctx.fillStyle = '#FB7185';
+          ctx.beginPath();
+          ctx.arc(0, 0, 3.6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#FFFFFF';
+          ctx.beginPath();
+          ctx.arc(0, 0, 2.0, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.fillStyle = '#FFFFFF';
+          ctx.beginPath();
+          ctx.arc(0, 0, 2.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
         ctx.restore();
       }
 
@@ -4970,11 +5101,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               : isFeedback && isSelected
                 ? '#FB7185'
                 : 'rgba(56, 189, 248, 0.85)';
-          ctx.shadowColor = borderColor;
-          ctx.shadowBlur = isAligned ? 18 : 9;
-          ctx.lineWidth = isAligned || isSelected || (isFeedback && isCorrectChoice) ? 4.4 : 2.8;
+          const frontWidth =
+            isAligned || isSelected || (isFeedback && isCorrectChoice) ? 4.4 : 2.8;
+          ctx.globalAlpha = 0.24;
+          ctx.lineWidth = frontWidth + 5;
           ctx.beginPath();
           ctx.ellipse(GATE_ENTRY_X, cy, rx, ry, 0, Math.PI * 0.5, Math.PI * 1.5);
+          ctx.stroke();
+
+          ctx.globalAlpha = 1;
+          ctx.lineWidth = frontWidth;
           ctx.stroke();
           ctx.restore();
 
@@ -5201,8 +5337,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             }
           }
 
-          // Shield Break Target Node directly on the "(" arc
+          // Shield Break Target Node directly on the "(" arc (zero shadowBlur)
           ctx.save();
+          if (isAimed || dmgRatio > 0) {
+            ctx.fillStyle = borderColor;
+            ctx.globalAlpha = 0.28;
+            ctx.beginPath();
+            ctx.arc(shieldNodeX, cy, 17, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+          }
           ctx.fillStyle = isFeedback
             ? isCorrectChoice
               ? '#10B981'
@@ -5214,8 +5358,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               : isAimed
                 ? '#67E8F9'
                 : '#38BDF8';
-          ctx.shadowColor = borderColor;
-          ctx.shadowBlur = isAimed || dmgRatio > 0 ? 18 : 8;
           ctx.beginPath();
           ctx.arc(shieldNodeX, cy, isAimed || dmgRatio > 0 ? 11 : 8, 0, Math.PI * 2);
           ctx.fill();
@@ -5457,6 +5599,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           combo: s.combo,
           comboTimerRatio: s.comboTimer / 3.5,
           courseId: s.courseId,
+          difficulty: s.difficulty,
           stageNumber: s.stageNumber,
           stageHalf: s.stageHalf,
           itemsEnabled: s.itemsEnabled,
