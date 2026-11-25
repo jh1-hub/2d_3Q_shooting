@@ -221,7 +221,6 @@ export const GameView: React.FC = () => {
     useState<DifficultyMode>('normal');
   const [debugStartStage, setDebugStartStage] = useState(1);
   const [debugWeaponLevel, setDebugWeaponLevel] = useState(1);
-  const [courseSectionOpen, setCourseSectionOpen] = useState(true);
   const [shipSectionOpen, setShipSectionOpen] = useState(() =>
     typeof window === 'undefined'
       ? true
@@ -903,11 +902,11 @@ export const GameView: React.FC = () => {
 
           {isInstalled ? (
             <span
+              aria-label="アプリ導入済み"
               title="アプリ導入済み"
-              className="inline-flex items-center gap-1 px-2.5 py-2 rounded-lg bg-emerald-950/85 border border-emerald-500/45 text-emerald-300 text-xs font-mono font-semibold whitespace-nowrap shrink-0"
+              className="p-2.5 rounded-lg bg-emerald-950/85 border border-emerald-500/45 text-emerald-300 inline-flex items-center justify-center shrink-0"
             >
-              <Check className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">導入済</span>
+              <Check className="w-4 h-4" />
             </span>
           ) : (
             <button
@@ -921,10 +920,9 @@ export const GameView: React.FC = () => {
               }}
               aria-label="アプリをダウンロード"
               title="アプリをダウンロード"
-              className="inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-lg bg-slate-900/85 border border-cyan-500/50 text-cyan-200 hover:border-cyan-300 hover:text-white transition-colors text-xs font-mono font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+              className="p-2.5 rounded-lg bg-slate-900/85 border border-cyan-500/50 text-cyan-300 hover:border-cyan-300 hover:text-white transition-colors inline-flex items-center justify-center shrink-0 cursor-pointer"
             >
-              <Download className="w-4 h-4 text-cyan-400" />
-              <span className="hidden sm:inline">アプリ保存</span>
+              <Download className="w-4 h-4" />
             </button>
           )}
 
@@ -1089,102 +1087,78 @@ export const GameView: React.FC = () => {
               </div>
             </div>
 
-            {/* Primary Learning Focus: 4-Course / Quiz Category Selector */}
+            {/* Primary Learning Focus: 4-Course / Quiz Category Selector (always expanded) */}
             <div className="bg-slate-950/55 border border-cyan-500/25 rounded-xl p-3 sm:p-4 flex flex-col gap-3">
-              <button
-                type="button"
-                onClick={() => setCourseSectionOpen((prev) => !prev)}
-                aria-expanded={courseSectionOpen}
-                className="w-full flex items-center justify-between gap-2.5 text-left cursor-pointer group"
-              >
-                <div className="flex flex-wrap items-center gap-2 min-w-0">
-                  <span className="text-xs font-mono font-bold tracking-[0.18em] text-cyan-300 whitespace-nowrap">
-                    LEARNING COURSE
-                  </span>
-                  <span className="text-xs font-medium text-slate-200 whitespace-nowrap">
-                    出題分野・ステージを選択
-                  </span>
-                  {!courseSectionOpen && (
-                    <span
-                      className="text-xs font-semibold truncate px-2 py-0.5 rounded bg-slate-900 border border-slate-700"
-                      style={{color: COURSES[selectedCourse].accentColor}}
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
+                <span className="text-xs font-mono font-bold tracking-[0.18em] text-cyan-300 whitespace-nowrap">
+                  LEARNING COURSE
+                </span>
+                <span className="text-xs font-medium text-slate-200 whitespace-nowrap">
+                  出題分野・ステージを選択
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-stretch">
+                {(Object.keys(COURSES) as CourseId[]).map((cid) => {
+                  const course = COURSES[cid];
+                  const active = selectedCourse === cid;
+                  return (
+                    <button
+                      key={cid}
+                      type="button"
+                      onClick={() => setSelectedCourse(cid)}
+                      className={`h-full text-left p-3 sm:p-3.5 rounded-xl border transition-colors cursor-pointer flex flex-col gap-2.5 ${
+                        active
+                          ? 'bg-slate-800/95 border-cyan-400 ring-1 ring-cyan-400/35 shadow-lg shadow-cyan-950/40'
+                          : 'bg-slate-900/70 border-slate-800 hover:border-slate-600'
+                      }`}
                     >
-                      {COURSES[selectedCourse].code}:{' '}
-                      {COURSES[selectedCourse].quizCategoryLabel}
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono text-slate-400 group-hover:text-cyan-300 transition-colors">
-                  <span className="hidden sm:inline">
-                    {courseSectionOpen ? '折りたたむ' : '開く'}
-                  </span>
-                  {courseSectionOpen ? (
-                    <ChevronDown className="w-4 h-4 text-cyan-400" />
-                  ) : (
-                    <ChevronRight className="w-4 h-4 text-slate-400" />
-                  )}
-                </div>
-              </button>
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className="font-mono text-[11px] font-bold tracking-wider shrink-0"
+                          style={{color: course.accentColor}}
+                        >
+                          {course.code}
+                        </span>
+                        <span className="font-mono text-[10px] text-slate-400 truncate">
+                          {course.name}
+                        </span>
+                      </div>
 
-              {courseSectionOpen && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {(Object.keys(COURSES) as CourseId[]).map((cid) => {
-                    const course = COURSES[cid];
-                    const active = selectedCourse === cid;
-                    return (
-                      <button
-                        key={cid}
-                        type="button"
-                        onClick={() => setSelectedCourse(cid)}
-                        className={`text-left p-3 sm:p-3.5 rounded-xl border transition-colors cursor-pointer flex flex-col gap-2.5 ${
-                          active
-                            ? 'bg-slate-800/95 border-cyan-400 ring-1 ring-cyan-400/35 shadow-lg shadow-cyan-950/40'
-                            : 'bg-slate-900/70 border-slate-800 hover:border-slate-600'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span
-                            className="font-mono text-[11px] font-bold tracking-wider"
-                            style={{color: course.accentColor}}
-                          >
-                            {course.code}
-                          </span>
-                          <span className="font-mono text-[10px] text-slate-400 truncate">
-                            {course.name}
-                          </span>
+                      <div className="flex-1 flex flex-col justify-start">
+                        <div className="text-[10px] font-mono text-cyan-300/80 mb-0.5">
+                          出題分野
                         </div>
-
-                        <div className="min-h-[2.75rem] flex flex-col justify-center">
-                          <div className="text-[10px] font-mono text-cyan-300/80 mb-0.5">
-                            出題分野
-                          </div>
-                          <div
-                            className="text-sm sm:text-[15px] font-bold leading-snug"
-                            style={{color: active ? '#FFFFFF' : '#E2E8F0'}}
-                          >
-                            {course.quizCategoryLabel}
-                          </div>
+                        <div
+                          className="text-sm lg:text-[15px] font-bold leading-snug"
+                          style={{color: active ? '#FFFFFF' : '#E2E8F0'}}
+                        >
+                          {course.quizCategoryLabel}
                         </div>
+                      </div>
 
+                      <div className="mt-auto flex flex-col gap-1.5">
                         <CoursePreviewSvg course={course} />
-
-                        <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-0.5">
-                          <span>STAGE 1–8</span>
-                          <span className="truncate">BOSS: {course.bossName}</span>
+                        <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-slate-400">
+                          <span className="shrink-0">STAGE 1–8</span>
+                          <span className="truncate">
+                            BOSS: {course.bossName}
+                          </span>
                         </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Ship Type Selector (Collapsible on small screens) */}
+            {/* Ship Type Selector (Collapsible on small screens, icon-only chevron) */}
             <div className="border-t border-slate-800 pt-3 flex flex-col gap-2.5">
               <button
                 type="button"
                 onClick={() => setShipSectionOpen((prev) => !prev)}
                 aria-expanded={shipSectionOpen}
+                aria-label="SHIP TYPE 表示切り替え"
                 className="w-full flex items-center justify-between gap-2.5 text-left cursor-pointer group"
               >
                 <div className="flex flex-wrap items-center gap-2 min-w-0">
@@ -1212,14 +1186,16 @@ export const GameView: React.FC = () => {
                   <span className="text-[10px] font-mono tabular-nums text-slate-500 whitespace-nowrap hidden sm:inline">
                     PLAYS: {progress.totalPlays}
                   </span>
-                  <span className="inline-flex items-center gap-1 text-[11px] font-mono text-slate-400 group-hover:text-cyan-300 transition-colors">
-                    <span>{shipSectionOpen ? '折りたたむ' : '機体を変更'}</span>
-                    {shipSectionOpen ? (
-                      <ChevronDown className="w-4 h-4 text-cyan-400" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4 text-slate-400" />
-                    )}
-                  </span>
+                  {!shipSectionOpen && (
+                    <span className="text-[11px] font-mono text-cyan-300 group-hover:text-cyan-200 transition-colors">
+                      機体を選択
+                    </span>
+                  )}
+                  {shipSectionOpen ? (
+                    <ChevronDown className="w-4 h-4 text-cyan-400 group-hover:text-cyan-300 transition-colors" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-cyan-300 transition-colors" />
+                  )}
                 </div>
               </button>
 

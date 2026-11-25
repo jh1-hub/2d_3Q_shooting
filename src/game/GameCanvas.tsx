@@ -1729,6 +1729,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
         synthAudio.playShoot('normal');
       } else if (weaponId === 'cross_laser') {
+        const isEvolvedA =
+          s.hiddenEvolutionUnlocked && s.patternId === 'missile_guard';
+        const crossDmg = isEvolvedA ? Math.round(dmg * 1.25) : dmg;
         for (const sign of [-1, 1]) {
           s.bullets.push({
             id: s.nextId++,
@@ -1736,11 +1739,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             y: p.y,
             vx: tpl.bulletSpeed + lv * 35,
             vy: 0,
-            damage: dmg,
-            radius: (7 + lv * 0.8) * sz,
+            damage: crossDmg,
+            radius: (isEvolvedA ? 11.5 + lv * 1.4 : 7 + lv * 0.8) * sz,
             color: tpl.color,
             kind: 'cross_laser',
-            pierce: 4 + lv,
+            pierce: (isEvolvedA ? 6 : 4) + lv,
             hitIds: new Set(),
             age: 0,
             maxAge: 2.2,
@@ -1748,6 +1751,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             phaseSign: sign,
             beamHalfLen: 105 + lv * 12,
             level: lv,
+            evolved: isEvolvedA,
           });
         }
         synthAudio.playShoot('laser');
@@ -1798,22 +1802,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         const isEvolvedD =
           s.hiddenEvolutionUnlocked && s.patternId === 'pierce';
         const beamHalfLen = isEvolvedC
-          ? 300 + lv * 65
-          : 115 + lv * 55 + (lv >= 4 ? 110 : 0);
+          ? 245 + lv * 45
+          : 115 + lv * 55 + (lv >= 4 ? 95 : 0);
         const beamRadius =
-          (isEvolvedC ? 11.5 + (lv - 1) * 4.5 : 8.5 + (lv - 1) * 5.2) * sz;
-        const laserDmg = isEvolvedC
-          ? Math.round(dmg * 1.24)
-          : isEvolvedD
-            ? Math.round(dmg * 1.12)
-            : dmg;
+          (isEvolvedC ? 9.5 + (lv - 1) * 4.2 : 8.5 + (lv - 1) * 5.2) * sz;
         s.bullets.push({
           id: s.nextId++,
           x: p.x + 26 + beamHalfLen,
           y: p.y,
-          vx: isEvolvedC ? tpl.bulletSpeed * 1.08 : tpl.bulletSpeed,
+          vx: tpl.bulletSpeed,
           vy: 0,
-          damage: laserDmg,
+          damage: dmg,
           radius: beamRadius,
           color: tpl.color,
           kind: 'laser',
@@ -2530,7 +2529,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         if (moveSpeed < 45) {
           s.laserStreamStrength = Math.min(1, s.laserStreamStrength + dt * 7.5);
         } else {
-          s.laserStreamStrength = Math.max(0.22, s.laserStreamStrength - dt * 5);
+          const floorStr =
+            s.patternId === 'balance' && s.hiddenEvolutionUnlocked ? 0 : 0.22;
+          s.laserStreamStrength = Math.max(floorStr, s.laserStreamStrength - dt * 6);
         }
       } else {
         s.laserStreamStrength = Math.max(0, s.laserStreamStrength - dt * 9);
@@ -2579,16 +2580,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           const next = prev - dt;
           if (next <= 0) {
             fireWeapon(wId, lv);
-            let interval =
+            const interval =
               WEAPONS[wId].fireInterval /
               (p.fireRateMult * (1 + (lv - 1) * 0.08));
-            if (
-              wId === 'laser' &&
-              s.hiddenEvolutionUnlocked &&
-              s.patternId === 'balance'
-            ) {
-              interval *= 0.42;
-            }
             s.weaponTimers[wId] = interval;
           } else {
             s.weaponTimers[wId] = next;
@@ -4423,53 +4417,74 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (s.laserStreamStrength > 0.02 && (isStreamD || isStreamC)) {
         const str = s.laserStreamStrength;
         const startX = p.x + 24;
-        const endX = isQuizRenderVisible
+        const maxEndX = isQuizRenderVisible
           ? Math.max(startX + 12, GATE_ENTRY_X + 2)
           : s.boss && (s.boss.shieldTimer > 0 || s.boss.shieldIntact || s.boss.quizState !== 'none')
             ? Math.max(startX + 12, getBossShieldXAtY(p.y))
             : LOGICAL_W + 30;
+        const endX =
+          isStreamC && !isStreamD ? Math.min(maxEndX, startX + 760) : maxEndX;
         const streamLen = Math.max(0, endX - startX);
-        const pulseWave = 1 + Math.sin(s.elapsedTime * 52) * 0.14;
-        const baseThickness = isStreamD ? 26 : 16;
+        const pulseWave = 1 + Math.sin(s.elapsedTime * 52) * (isEvolvedD ? 0.16 : 0.08);
+        const baseThickness = isEvolvedD ? 30 : isStreamD ? 15 : 14;
         const beamH = baseThickness * p.bulletSizeMult * (0.68 + 0.32 * str) * pulseWave;
 
         ctx.save();
 
-        // Outer soft halo & crimson plasma corridor (zero shadowBlur)
-        ctx.globalAlpha = str * 0.2;
+        // Outer soft halo & plasma corridor (restrained at normal Lv10, bold on TYPE-D Hidden Evolution)
+        if (isEvolvedD) {
+          ctx.globalAlpha = str * 0.24;
+          ctx.fillStyle = '#F43F5E';
+          ctx.fillRect(startX, p.y - beamH * 1.35, streamLen, beamH * 2.7);
+        }
+
+        ctx.globalAlpha = str * (isEvolvedD ? 0.48 : 0.28);
         ctx.fillStyle = isStreamC && !isStreamD ? '#38BDF8' : '#F43F5E';
-        ctx.fillRect(startX, p.y - beamH * 1.25, streamLen, beamH * 2.5);
+        ctx.fillRect(
+          startX,
+          p.y - beamH * (isEvolvedD ? 0.9 : 0.65),
+          streamLen,
+          beamH * (isEvolvedD ? 1.8 : 1.3),
+        );
 
-        ctx.globalAlpha = str * 0.44;
-        ctx.fillStyle = '#F43F5E';
-        ctx.fillRect(startX, p.y - beamH * 0.85, streamLen, beamH * 1.7);
-
-        // Mid rose-pink sustained beam
-        ctx.globalAlpha = str * 0.68;
+        // Mid sustained beam
+        ctx.globalAlpha = str * (isEvolvedD ? 0.72 : 0.48);
         ctx.fillStyle = isStreamC && !isStreamD ? '#A5F3FC' : '#FDA4AF';
-        ctx.fillRect(startX, p.y - beamH * 0.46, streamLen, beamH * 0.92);
+        ctx.fillRect(
+          startX,
+          p.y - beamH * (isEvolvedD ? 0.48 : 0.34),
+          streamLen,
+          beamH * (isEvolvedD ? 0.96 : 0.68),
+        );
 
-        // Inner blazing white core
-        ctx.globalAlpha = str * 0.86;
+        // Inner white core
+        ctx.globalAlpha = str * (isEvolvedD ? 0.9 : 0.68);
         ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(startX, p.y - beamH * 0.2, streamLen, beamH * 0.4);
+        ctx.fillRect(
+          startX,
+          p.y - beamH * (isEvolvedD ? 0.22 : 0.14),
+          streamLen,
+          beamH * (isEvolvedD ? 0.44 : 0.28),
+        );
 
-        // Racing plasma surge nodes along the continuous beam
-        const spacing = 130;
-        const offset = (s.elapsedTime * 1580) % spacing;
-        ctx.globalAlpha = str * 0.85;
-        for (let sx = startX + offset; sx < endX - 10; sx += spacing) {
-          ctx.fillStyle = '#FFFFFF';
-          ctx.beginPath();
-          ctx.ellipse(sx, p.y, 16, beamH * 0.42, 0, 0, Math.PI * 2);
-          ctx.fill();
+        // Racing plasma surge nodes (hidden evolution or TYPE-C stream)
+        if (isEvolvedD || isStreamC) {
+          const spacing = 130;
+          const offset = (s.elapsedTime * 1580) % spacing;
+          ctx.globalAlpha = str * (isEvolvedD ? 0.88 : 0.6);
+          for (let sx = startX + offset; sx < endX - 10; sx += spacing) {
+            ctx.fillStyle = '#FFFFFF';
+            ctx.beginPath();
+            ctx.ellipse(sx, p.y, isEvolvedD ? 18 : 13, beamH * 0.42, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
 
         // TYPE-D Hidden Evolution: crackling electrical discharge along Mega Laser
         if (isEvolvedD && streamLen > 30) {
-          ctx.globalAlpha = str * 0.9;
+          ctx.globalAlpha = str * 0.92;
           ctx.strokeStyle = '#67E8F9';
-          ctx.lineWidth = 2;
+          ctx.lineWidth = 2.2;
           const arcStep = 44;
           const phase = s.elapsedTime * 36;
           ctx.beginPath();
@@ -4481,7 +4496,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.stroke();
 
           ctx.strokeStyle = '#FFFFFF';
-          ctx.lineWidth = 1.2;
+          ctx.lineWidth = 1.3;
           ctx.beginPath();
           ctx.moveTo(startX, p.y);
           for (let ax = startX + 36; ax < endX; ax += 52) {
@@ -4492,15 +4507,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
 
         // Muzzle energy corona at ship nose
-        const flareR = (isStreamD ? 18 : 13) * pulseWave * str;
-        ctx.globalAlpha = str * 0.92;
+        const flareR = (isEvolvedD ? 21 : isStreamD ? 11 : 12) * pulseWave * str;
+        ctx.globalAlpha = str * (isEvolvedD ? 0.95 : 0.65);
         ctx.fillStyle = isStreamC && !isStreamD ? '#67E8F9' : '#FDA4AF';
         ctx.beginPath();
-        ctx.ellipse(startX + 4, p.y, flareR * 1.4, flareR * 0.85, 0, 0, Math.PI * 2);
+        ctx.ellipse(startX + 4, p.y, flareR * 1.35, flareR * 0.82, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.fillStyle = '#FFFFFF';
         ctx.beginPath();
-        ctx.arc(startX + 2, p.y, flareR * 0.55, 0, Math.PI * 2);
+        ctx.arc(startX + 2, p.y, flareR * 0.5, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       }
@@ -4513,7 +4528,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           const halfLen = b.beamHalfLen ?? 90;
           const fullLen = halfLen * 2;
           const isMega = (b.level ?? 1) >= 4;
-          const outerH = b.radius * (isMega ? 1.32 : 1.24);
+          const outerH =
+            b.radius * (isMega ? (b.evolved ? 1.56 : 0.96) : b.evolved ? 1.24 : 1.12);
           ctx.fillStyle = b.color;
           ctx.beginPath();
           ctx.roundRect(b.x - halfLen, b.y - outerH * 0.5, fullLen, outerH, outerH * 0.5);
@@ -4529,16 +4545,14 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.roundRect(b.x - halfLen + 8, b.y - outerH * 0.16, Math.max(6, fullLen - 16), outerH * 0.32, outerH * 0.16);
           ctx.fill();
 
-          if (isMega) {
+          if (isMega && b.evolved) {
             ctx.fillStyle = '#FFFFFF';
             ctx.beginPath();
-            ctx.ellipse(b.x + halfLen - 6, b.y, 12, outerH * 0.45, 0, 0, Math.PI * 2);
+            ctx.ellipse(b.x + halfLen - 6, b.y, 14, outerH * 0.46, 0, 0, Math.PI * 2);
             ctx.fill();
-          }
 
-          if (b.evolved && isMega) {
             ctx.strokeStyle = '#67E8F9';
-            ctx.lineWidth = 1.8;
+            ctx.lineWidth = 2;
             ctx.beginPath();
             const segs = 5;
             const x0 = b.x - halfLen + 10;
@@ -4561,7 +4575,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           const dtStep = maxBack / segments;
           ctx.lineCap = 'round';
           ctx.lineJoin = 'round';
-          ctx.lineWidth = Math.max(5.5, b.radius * 0.78);
+          if (b.evolved) {
+            ctx.globalAlpha = 0.3;
+            ctx.strokeStyle = '#C4B5FD';
+            ctx.lineWidth = Math.max(12, b.radius * 1.35);
+            ctx.beginPath();
+            for (let sIdx = 0; sIdx <= segments; sIdx++) {
+              const tBack = sIdx * dtStep;
+              const tSample = b.age - tBack;
+              const sx = b.x - b.vx * tBack;
+              const sy = originY + sign * Math.sin(tSample * 17) * amp;
+              if (sIdx === 0) ctx.moveTo(sx, sy);
+              else ctx.lineTo(sx, sy);
+            }
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          }
+
+          ctx.strokeStyle = b.evolved ? '#DDD6FE' : b.color;
+          ctx.lineWidth = b.evolved
+            ? Math.max(8.5, b.radius * 0.88)
+            : Math.max(5.5, b.radius * 0.78);
           ctx.beginPath();
           for (let sIdx = 0; sIdx <= segments; sIdx++) {
             const tBack = sIdx * dtStep;
@@ -4574,7 +4608,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.stroke();
 
           ctx.strokeStyle = '#FFFFFF';
-          ctx.lineWidth = Math.max(2.2, b.radius * 0.3);
+          ctx.lineWidth = b.evolved
+            ? Math.max(3.6, b.radius * 0.38)
+            : Math.max(2.2, b.radius * 0.3);
           ctx.beginPath();
           for (let sIdx = 0; sIdx <= segments; sIdx++) {
             const tBack = sIdx * dtStep;
@@ -4588,7 +4624,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
           ctx.fillStyle = '#FFFFFF';
           ctx.beginPath();
-          ctx.arc(b.x, b.y, Math.max(3, b.radius * 0.36), 0, Math.PI * 2);
+          ctx.arc(
+            b.x,
+            b.y,
+            b.evolved ? Math.max(4.5, b.radius * 0.44) : Math.max(3, b.radius * 0.36),
+            0,
+            Math.PI * 2,
+          );
           ctx.fill();
         } else if (b.kind === 'back_shot') {
           const ang = Math.atan2(b.vy, b.vx);
@@ -4607,26 +4649,37 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.restore();
         } else if (b.kind === 'ripple') {
           if (b.evolved) {
-            ctx.globalAlpha = 0.32;
+            const rx = b.radius * 0.58;
+            const ry = b.radius * 1.04;
+
+            // Boss "("-shield inspired thick plasma ring: outer glow + thick neon band + bright white core + travelling nodes
+            ctx.globalAlpha = 0.28;
+            ctx.strokeStyle = '#10B981';
+            ctx.lineWidth = 17;
+            ctx.beginPath();
+            ctx.ellipse(b.x, b.y, rx, ry, 0, 0, Math.PI * 2);
+            ctx.stroke();
+
+            ctx.globalAlpha = 0.96;
             ctx.strokeStyle = '#34D399';
-            ctx.lineWidth = 10;
-            ctx.beginPath();
-            ctx.ellipse(b.x, b.y, b.radius * 0.62, b.radius * 1.06, 0, 0, Math.PI * 2);
+            ctx.lineWidth = 8.5;
             ctx.stroke();
 
-            ctx.globalAlpha = 0.92;
-            ctx.strokeStyle = '#67E8F9';
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            ctx.ellipse(b.x, b.y, b.radius * 0.56, b.radius, 0, 0, Math.PI * 2);
+            ctx.globalAlpha = 0.96;
+            ctx.strokeStyle = '#F0F9FF';
+            ctx.lineWidth = 2.6;
             ctx.stroke();
 
-            ctx.globalAlpha = 0.85;
-            ctx.strokeStyle = '#FFFFFF';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.ellipse(b.x + 2, b.y, b.radius * 0.38, b.radius * 0.72, 0, 0, Math.PI * 2);
-            ctx.stroke();
+            ctx.fillStyle = '#FFFFFF';
+            for (let n = 0; n < 4; n++) {
+              const ang = s.elapsedTime * 6.5 + (n * Math.PI) / 2;
+              const nx = b.x + Math.cos(ang) * rx;
+              const ny = b.y + Math.sin(ang) * ry;
+              ctx.beginPath();
+              ctx.arc(nx, ny, 3.6, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            ctx.globalAlpha = 1;
           } else {
             ctx.globalAlpha = 0.3;
             ctx.lineWidth = 7;
