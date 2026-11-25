@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#0E2439" />
+      <stop offset="65%" stop-color="#070B14" />
+      <stop offset="100%" stop-color="#050811" />
+    </radialGradient>
+    <linearGradient id="hull" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0284C7" />
+      <stop offset="55%" stop-color="#22D3EE" />
+      <stop offset="100%" stop-color="#E0F2FE" />
+    </linearGradient>
+    <linearGradient id="wing" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8" />
+      <stop offset="100%" stop-color="#0369A1" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bgGlow)" />
+  <circle cx="256" cy="256" r="206" fill="none" stroke="#22D3EE" stroke-opacity="0.18" stroke-width="4" />
+  <circle cx="256" cy="256" r="172" fill="none" stroke="#38BDF8" stroke-opacity="0.12" stroke-width="2" stroke-dasharray="16 12" />
+  <!-- Thruster glow -->
+  <polygon points="88,256 164,230 164,282" fill="#38BDF8" fill-opacity="0.7" />
+  <polygon points="62,256 154,242 154,270" fill="#E0F2FE" fill-opacity="0.9" />
+  <!-- Upper & Lower Wings -->
+  <polygon points="158,242 214,128 318,216 206,246" fill="url(#wing)" />
+  <polygon points="158,270 214,384 318,296 206,266" fill="url(#wing)" />
+  <!-- Main Arrow Fuselage -->
+  <polygon points="146,232 322,226 428,256 322,286 146,280 176,256" fill="url(#hull)" />
+  <!-- Canopy -->
+  <polygon points="248,244 334,248 362,256 334,264 248,268" fill="#070B14" />
+  <polygon points="258,248 326,251 344,256 326,261 258,264" fill="#67E8F9" fill-opacity="0.8" />
+  <!-- Wingtip Accents -->
+  <line x1="214" y1="128" x2="262" y2="128" stroke="#67E8F9" stroke-width="8" stroke-linecap="round" />
+  <line x1="214" y1="384" x2="262" y2="384" stroke="#67E8F9" stroke-width="8" stroke-linecap="round" />
+</svg>

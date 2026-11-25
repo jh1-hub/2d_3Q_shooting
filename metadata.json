@@ -1,0 +1,8 @@
+{
+  "name": "2Dシューティング学習Remix ARROW-01 | 2157 Cyber Shmup \u0026 Godot 4 Project",
+  "description": "2157年のネオン都市を舞台にした横スクロール・ローグライトシューティング『ARROW-01』のプレイアブルビルドと、Godot 4 + GDScript 設計・実装一式。",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
