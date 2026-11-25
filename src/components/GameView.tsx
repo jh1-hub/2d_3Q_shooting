@@ -159,6 +159,8 @@ export const GameView: React.FC = () => {
       autoShot: true,
       bgmEnabled: true,
       sfxEnabled: true,
+      bgmVolume: 0.7,
+      sfxVolume: 0.85,
       touchSensitivity: 1.2,
       screenShake: true,
     };
@@ -184,6 +186,14 @@ export const GameView: React.FC = () => {
           typeof parsed.sfxEnabled === 'boolean'
             ? parsed.sfxEnabled
             : legacySound,
+        bgmVolume:
+          typeof parsed.bgmVolume === 'number'
+            ? Math.max(0, Math.min(1, parsed.bgmVolume))
+            : defaults.bgmVolume,
+        sfxVolume:
+          typeof parsed.sfxVolume === 'number'
+            ? Math.max(0, Math.min(1, parsed.sfxVolume))
+            : defaults.sfxVolume,
         touchSensitivity:
           typeof parsed.touchSensitivity === 'number'
             ? Math.max(0.7, Math.min(2.0, parsed.touchSensitivity))
@@ -204,6 +214,9 @@ export const GameView: React.FC = () => {
   const [expandedRuleIds, setExpandedRuleIds] = useState<
     Record<string, boolean>
   >({});
+  const [debugPanelOpen, setDebugPanelOpen] = useState(false);
+  const [debugStartStage, setDebugStartStage] = useState(1);
+  const [debugWeaponLevel, setDebugWeaponLevel] = useState(1);
   const preMuteAudioRef = useRef<{bgm: boolean; sfx: boolean}>({
     bgm: true,
     sfx: true,
@@ -247,6 +260,8 @@ export const GameView: React.FC = () => {
     xpToNext: 40,
     shieldScoreProgress: 0,
     shieldScoreRequired: 50000,
+    hiddenEvolution: false,
+    postMaxShieldMilestones: 0,
     combo: 0,
     comboTimerRatio: 0,
     courseId: 'neon_city',
@@ -291,7 +306,9 @@ export const GameView: React.FC = () => {
 
   useEffect(() => {
     bgmManager.setEnabled(settings.bgmEnabled);
+    bgmManager.setVolume(settings.bgmVolume);
     synthAudio.setEnabled(settings.sfxEnabled);
+    synthAudio.setVolume(settings.sfxVolume);
     if (typeof window !== 'undefined') {
       try {
         window.localStorage.setItem(
@@ -404,6 +421,34 @@ export const GameView: React.FC = () => {
       selectedDifficulty,
     );
   }, [progress, selectedCourse, selectedDifficulty, selectedPattern]);
+
+  const startDebugRun = useCallback(() => {
+    if (bgmManager.getLoadState().status !== 'ready') return;
+    const effectivePattern = isPatternUnlocked(selectedPattern, progress)
+      ? selectedPattern
+      : 'missile_guard';
+    if (effectivePattern !== selectedPattern) {
+      setSelectedPattern(effectivePattern);
+    }
+    setSettingsOpen(false);
+    bgmManager.restartGameTrack();
+    engineRef.current?.startNewRun(
+      effectivePattern,
+      selectedCourse,
+      selectedDifficulty,
+      {
+        startStage: debugStartStage,
+        weaponPowerLevel: debugWeaponLevel,
+      },
+    );
+  }, [
+    debugStartStage,
+    debugWeaponLevel,
+    progress,
+    selectedCourse,
+    selectedDifficulty,
+    selectedPattern,
+  ]);
 
   const toggleBgm = () => {
     setSettings((prev) => ({...prev, bgmEnabled: !prev.bgmEnabled}));
@@ -564,15 +609,27 @@ export const GameView: React.FC = () => {
           <div className="w-full flex items-center gap-2">
             <span
               className={`text-[11px] font-mono font-semibold tabular-nums whitespace-nowrap ${
-                hud.isMaxLevel ? 'text-sky-300' : 'text-emerald-300'
+                hud.hiddenEvolution
+                  ? 'text-amber-300'
+                  : hud.isMaxLevel
+                    ? 'text-sky-300'
+                    : 'text-emerald-300'
               }`}
             >
-              {hud.isMaxLevel ? 'LV MAX' : `LV ${hud.level}`}
+              {hud.hiddenEvolution
+                ? 'LV MAX ★'
+                : hud.isMaxLevel
+                  ? 'LV MAX'
+                  : `LV ${hud.level}`}
             </span>
             <div className="flex-1 h-2 bg-slate-900/90 border border-slate-700/80 rounded-sm overflow-hidden">
               <div
                 className={`h-full transition-[width] duration-150 ${
-                  hud.isMaxLevel ? 'bg-sky-400' : 'bg-emerald-400'
+                  hud.hiddenEvolution
+                    ? 'bg-amber-400'
+                    : hud.isMaxLevel
+                      ? 'bg-sky-400'
+                      : 'bg-emerald-400'
                 }`}
                 style={{width: `${xpPercent}%`}}
               />
@@ -589,7 +646,7 @@ export const GameView: React.FC = () => {
             <div className="text-sm sm:text-base font-bold text-white leading-tight flex items-center justify-end gap-1.5">
               {hud.difficulty === 'hard' && (
                 <span className="text-[10px] font-bold text-rose-400">
-                  x1.1
+                  x1.5
                 </span>
               )}
               <span>{hud.score.toLocaleString()}</span>
@@ -776,8 +833,8 @@ export const GameView: React.FC = () => {
                     : hud.quizResult === 'correct'
                       ? '正解！ アイテム出現あり — エリアへブースト突入！'
                       : hud.quizResult === 'timeout'
-                        ? `TIME UP！ 正解は ${hud.quizCorrectLabel}：${hud.quizCorrectChoiceText}（EXP -15% / 敵弾貫通 / アイテムなし）`
-                        : `不正解… 正解は ${hud.quizCorrectLabel}：${hud.quizCorrectChoiceText}（EXP -15% / 敵弾貫通 / アイテムなし）`}
+                        ? `TIME UP！ 正解は ${hud.quizCorrectLabel}：${hud.quizCorrectChoiceText}（EXP -20% / 敵弾貫通 / アイテムなし）`
+                        : `不正解… 正解は ${hud.quizCorrectLabel}：${hud.quizCorrectChoiceText}（EXP -20% / 敵弾貫通 / アイテムなし）`}
                 </div>
               )}
             </div>
@@ -885,15 +942,27 @@ export const GameView: React.FC = () => {
             <div className="sm:hidden flex items-center justify-between gap-3 text-[11px] font-mono">
               <span
                 className={`font-semibold tabular-nums whitespace-nowrap ${
-                  hud.isMaxLevel ? 'text-sky-300' : 'text-emerald-300'
+                  hud.hiddenEvolution
+                    ? 'text-amber-300'
+                    : hud.isMaxLevel
+                      ? 'text-sky-300'
+                      : 'text-emerald-300'
                 }`}
               >
-                {hud.isMaxLevel ? 'LV MAX' : `LV ${hud.level}`}
+                {hud.hiddenEvolution
+                  ? 'LV MAX ★'
+                  : hud.isMaxLevel
+                    ? 'LV MAX'
+                    : `LV ${hud.level}`}
               </span>
               <div className="flex-1 h-1.5 bg-slate-900 border border-slate-700 rounded-sm overflow-hidden">
                 <div
                   className={`h-full ${
-                    hud.isMaxLevel ? 'bg-sky-400' : 'bg-emerald-400'
+                    hud.hiddenEvolution
+                      ? 'bg-amber-400'
+                      : hud.isMaxLevel
+                        ? 'bg-sky-400'
+                        : 'bg-emerald-400'
                   }`}
                   style={{width: `${xpPercent}%`}}
                 />
@@ -913,15 +982,27 @@ export const GameView: React.FC = () => {
         <div className="sm:hidden pointer-events-none absolute inset-x-0 bottom-0 px-3 py-2 flex items-center justify-between gap-3 bg-gradient-to-t from-slate-950/85 to-transparent text-[11px] font-mono">
           <span
             className={`font-semibold tabular-nums whitespace-nowrap ${
-              hud.isMaxLevel ? 'text-sky-300' : 'text-emerald-300'
+              hud.hiddenEvolution
+                ? 'text-amber-300'
+                : hud.isMaxLevel
+                  ? 'text-sky-300'
+                  : 'text-emerald-300'
             }`}
           >
-            {hud.isMaxLevel ? 'LV MAX' : `LV ${hud.level}`}
+            {hud.hiddenEvolution
+              ? 'LV MAX ★'
+              : hud.isMaxLevel
+                ? 'LV MAX'
+                : `LV ${hud.level}`}
           </span>
           <div className="flex-1 h-1.5 bg-slate-900 border border-slate-700 rounded-sm overflow-hidden">
             <div
               className={`h-full ${
-                hud.isMaxLevel ? 'bg-sky-400' : 'bg-emerald-400'
+                hud.hiddenEvolution
+                  ? 'bg-amber-400'
+                  : hud.isMaxLevel
+                    ? 'bg-sky-400'
+                    : 'bg-emerald-400'
               }`}
               style={{width: `${xpPercent}%`}}
             />
@@ -1159,7 +1240,7 @@ export const GameView: React.FC = () => {
 
                 {selectedDifficulty === 'hard' && (
                   <span className="text-[11px] font-mono text-rose-300">
-                    常時貫通弾 · SCORE x1.1
+                    常時貫通弾 · SCORE x1.5
                   </span>
                 )}
 
@@ -1397,44 +1478,94 @@ export const GameView: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="flex items-center justify-between py-2.5 border-b border-slate-800">
-                  <div>
-                    <div className="font-medium text-white">BGM</div>
-                    <div className="text-xs text-slate-400">
-                      TOP画面MIDI・プレイ中MP3のループ再生
+                <div className="py-2.5 border-b border-slate-800 flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-medium text-white">BGM</div>
+                      <div className="text-xs text-slate-400">
+                        TOP画面MIDI・プレイ中MP3のループ再生
+                      </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={toggleBgm}
+                      className={`px-4 py-1.5 text-xs font-mono font-semibold rounded-md transition-colors cursor-pointer ${
+                        settings.bgmEnabled
+                          ? 'bg-cyan-400 text-slate-950'
+                          : 'bg-slate-800 text-slate-300 border border-slate-700'
+                      }`}
+                    >
+                      {settings.bgmEnabled ? 'ON' : 'OFF'}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={toggleBgm}
-                    className={`px-4 py-1.5 text-xs font-mono font-semibold rounded-md transition-colors cursor-pointer ${
-                      settings.bgmEnabled
-                        ? 'bg-cyan-400 text-slate-950'
-                        : 'bg-slate-800 text-slate-300 border border-slate-700'
-                    }`}
-                  >
-                    {settings.bgmEnabled ? 'ON' : 'OFF'}
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] font-mono text-slate-400 w-10 shrink-0">
+                      音量
+                    </span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={settings.bgmVolume}
+                      onChange={(e) =>
+                        setSettings((p) => ({
+                          ...p,
+                          bgmVolume: parseFloat(e.target.value),
+                        }))
+                      }
+                      aria-label="BGM音量"
+                      className="flex-1 accent-cyan-400 cursor-pointer"
+                    />
+                    <span className="text-xs font-mono tabular-nums text-cyan-300 w-10 text-right shrink-0">
+                      {Math.round(settings.bgmVolume * 100)}%
+                    </span>
+                  </div>
                 </div>
 
-                <div className="flex items-center justify-between py-2.5 border-b border-slate-800">
-                  <div>
-                    <div className="font-medium text-white">効果音（SFX）</div>
-                    <div className="text-xs text-slate-400">
-                      射撃・撃破・クイズ・警告サウンド
+                <div className="py-2.5 border-b border-slate-800 flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-medium text-white">効果音（SFX）</div>
+                      <div className="text-xs text-slate-400">
+                        射撃・撃破・クイズ・警告サウンド
+                      </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={toggleSfx}
+                      className={`px-4 py-1.5 text-xs font-mono font-semibold rounded-md transition-colors cursor-pointer ${
+                        settings.sfxEnabled
+                          ? 'bg-cyan-400 text-slate-950'
+                          : 'bg-slate-800 text-slate-300 border border-slate-700'
+                      }`}
+                    >
+                      {settings.sfxEnabled ? 'ON' : 'OFF'}
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={toggleSfx}
-                    className={`px-4 py-1.5 text-xs font-mono font-semibold rounded-md transition-colors cursor-pointer ${
-                      settings.sfxEnabled
-                        ? 'bg-cyan-400 text-slate-950'
-                        : 'bg-slate-800 text-slate-300 border border-slate-700'
-                    }`}
-                  >
-                    {settings.sfxEnabled ? 'ON' : 'OFF'}
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] font-mono text-slate-400 w-10 shrink-0">
+                      音量
+                    </span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={settings.sfxVolume}
+                      onChange={(e) =>
+                        setSettings((p) => ({
+                          ...p,
+                          sfxVolume: parseFloat(e.target.value),
+                        }))
+                      }
+                      aria-label="効果音音量"
+                      className="flex-1 accent-cyan-400 cursor-pointer"
+                    />
+                    <span className="text-xs font-mono tabular-nums text-cyan-300 w-10 text-right shrink-0">
+                      {Math.round(settings.sfxVolume * 100)}%
+                    </span>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between py-2.5 border-b border-slate-800">
@@ -1547,13 +1678,13 @@ export const GameView: React.FC = () => {
                     },
                     {
                       id: 'upgrade',
-                      title: '武装レベルアップ・Lv10上限とシールド回復',
-                      body: '経験値チップで自動進化します（最大Lv10）。レベルアップ時のシールド獲得は一度取得済みの場合ポイントへ変換されます（初回MAXでポイントになった分は後で減少時に取得可能）。Lv10到達後は一定スコア達成ごとにシールドが1回復します。',
+                      title: '武装レベルアップ・Lv10上限と隠し強化',
+                      body: '経験値チップで自動進化します（最大Lv10）。レベルアップ時のシールド獲得は一度取得済みの場合ポイントへ変換されます（初回MAXでポイントになった分は後で減少時に取得可能）。Lv10到達後は一定スコア達成ごとにシールドが回復し、この取得ラインを2回踏破すると各機体の隠し強化が解放されます（クイズ誤答によるパワーダウンで失われますが、再度2回踏破すると再取得できます）。',
                     },
                     {
                       id: 'gate_quiz',
                       title: 'ステージ前半・後半の4択クイズゲート',
-                      body: '各ステージ前半・後半の突入前に30秒制限のゲート選択が発生します（コース01〜03は各専門ジャンル、04は全ジャンルから出題）。時間経過で自機は右へ進み、正解ゲートを通ると+1000点・通常通りアイテムが出現します。不正解・時間切れの場合は-1000点・取得経験値全体が15%低下（LvMAX時のシールド累計スコアは維持）し、そのエリアではアイテムが出現せず敵弾が貫通属性になります。',
+                      body: '各ステージ前半・後半の突入前に30秒制限のゲート選択が発生します（コース01〜03は各専門ジャンル、04は全ジャンルから出題）。時間経過で自機は右へ進み、正解ゲートを通ると+1000点・通常通りアイテムが出現します。不正解・時間切れの場合は-1000点・取得経験値全体が20%低下（LvMAX時のシールド累計スコアは維持）し、そのエリアではアイテムが出現せず敵弾が貫通属性になります。',
                     },
                     {
                       id: 'boss_quiz',
@@ -1563,7 +1694,7 @@ export const GameView: React.FC = () => {
                     {
                       id: 'difficulty',
                       title: 'NORMAL / HARD 難易度とエンドレスモード',
-                      body: 'トップ画面でNORMALとHARDを切り替えられます。HARDでは常時敵の攻撃が貫通弾となり、獲得スコアが1.1倍になります（敵の耐久力や攻撃パターンも強化されます）。STAGE 8クリア後はエンドレスモードへ突入でき、通常モードのボス正解時でも最初のボスPhase1の1%からフェーズ・ボス戦ごとに1%ずつ貫通弾率が上昇します。',
+                      body: 'トップ画面でNORMALとHARDを切り替えられます。HARDでは常時敵の攻撃が貫通弾となり、獲得スコアが1.5倍になります（敵の耐久力や攻撃パターンも強化されます）。STAGE 8クリア後はエンドレスモードへ突入でき、通常モードのボス正解時でも最初のボスPhase1の1%からフェーズ・ボス戦ごとに1%ずつ貫通弾率が上昇します。',
                     },
                   ].map((rule) => {
                     const isOpen = Boolean(expandedRuleIds[rule.id]);
@@ -1593,6 +1724,104 @@ export const GameView: React.FC = () => {
                       </div>
                     );
                   })}
+                </div>
+
+                {/* Debug Mode (collapsible button, easily hideable later) */}
+                <div className="bg-slate-950/70 border border-amber-500/30 rounded-lg p-3 flex flex-col gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setDebugPanelOpen((prev) => !prev)}
+                    aria-expanded={debugPanelOpen}
+                    className="w-full flex items-center justify-between gap-2 text-left text-xs font-mono font-semibold text-amber-300 hover:text-amber-200 transition-colors cursor-pointer"
+                  >
+                    <span>デバッグモード</span>
+                    {debugPanelOpen ? (
+                      <ChevronDown className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                    ) : (
+                      <ChevronRight className="w-3.5 h-3.5 text-amber-400/80 shrink-0" />
+                    )}
+                  </button>
+
+                  {debugPanelOpen && (
+                    <div className="flex flex-col gap-3.5 pt-2.5 border-t border-slate-800">
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5 text-xs">
+                          <span className="text-slate-200 font-medium">
+                            開始ステージ
+                          </span>
+                          <span className="font-mono font-bold text-amber-300 tabular-nums">
+                            {debugStartStage >= 9
+                              ? 'ENDLESS (STAGE 9)'
+                              : `STAGE ${debugStartStage}`}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="1"
+                          max="9"
+                          step="1"
+                          value={debugStartStage}
+                          onChange={(e) =>
+                            setDebugStartStage(parseInt(e.target.value, 10))
+                          }
+                          aria-label="デバッグ開始ステージ"
+                          className="w-full accent-amber-400 cursor-pointer"
+                        />
+                        <div className="flex justify-between text-[10px] font-mono text-slate-500 mt-0.5">
+                          <span>1</span>
+                          <span>4</span>
+                          <span>8</span>
+                          <span>ENDLESS</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5 text-xs">
+                          <span className="text-slate-200 font-medium">
+                            自機の強化状態
+                          </span>
+                          <span className="font-mono font-bold text-cyan-300 tabular-nums">
+                            {debugWeaponLevel >= 11
+                              ? 'LV 10 ★ 隠し強化'
+                              : `LV ${debugWeaponLevel}`}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="1"
+                          max="11"
+                          step="1"
+                          value={debugWeaponLevel}
+                          onChange={(e) =>
+                            setDebugWeaponLevel(parseInt(e.target.value, 10))
+                          }
+                          aria-label="デバッグ自機強化状態"
+                          className="w-full accent-cyan-400 cursor-pointer"
+                        />
+                        <div className="flex justify-between text-[10px] font-mono text-slate-500 mt-0.5">
+                          <span>LV 1</span>
+                          <span>LV 5</span>
+                          <span>LV 10</span>
+                          <span>★ 隠し強化</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3 pt-1">
+                        <span className="text-[11px] font-mono text-slate-400">
+                          {UPGRADE_PATTERNS[selectedPattern].name} ·{' '}
+                          {selectedDifficulty.toUpperCase()}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={!isBgmReady}
+                          onClick={startDebugRun}
+                          className="px-4 py-2 rounded-md bg-amber-400 hover:bg-amber-300 disabled:bg-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed text-slate-950 font-mono text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                        >
+                          {isBgmReady ? 'デバッグ出撃' : 'BGM LOADING...'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

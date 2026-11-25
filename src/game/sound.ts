@@ -3,10 +3,22 @@ class SynthAudio {
   private master: GainNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
   private enabled = true;
+  private volume = 0.85;
   private lastShootTime: Record<string, number> = {};
 
   public setEnabled(val: boolean) {
     this.enabled = val;
+  }
+
+  public setVolume(val: number) {
+    this.volume = Math.max(0, Math.min(1, val));
+    if (this.ctx && this.master) {
+      this.master.gain.setTargetAtTime(
+        this.volume,
+        this.ctx.currentTime,
+        0.02,
+      );
+    }
   }
 
   private ensureContext(): AudioContext | null {
@@ -27,7 +39,7 @@ class SynthAudio {
         compressor.release.setValueAtTime(0.16, this.ctx.currentTime);
 
         const masterGain = this.ctx.createGain();
-        masterGain.gain.setValueAtTime(0.85, this.ctx.currentTime);
+        masterGain.gain.setValueAtTime(this.volume, this.ctx.currentTime);
         masterGain.connect(compressor);
         compressor.connect(this.ctx.destination);
         this.master = masterGain;

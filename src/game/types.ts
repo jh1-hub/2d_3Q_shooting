@@ -111,6 +111,8 @@ export interface GameSettings {
   autoShot: boolean;
   bgmEnabled: boolean;
   sfxEnabled: boolean;
+  bgmVolume: number;
+  sfxVolume: number;
   touchSensitivity: number;
   screenShake: boolean;
 }
@@ -126,6 +128,8 @@ export interface HudSnapshot {
   xpToNext: number;
   shieldScoreProgress: number;
   shieldScoreRequired: number;
+  hiddenEvolution: boolean;
+  postMaxShieldMilestones: number;
   combo: number;
   comboTimerRatio: number;
   courseId: CourseId;

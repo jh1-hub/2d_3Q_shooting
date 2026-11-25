@@ -31,8 +31,21 @@ class BgmManager {
   };
   private listeners = new Set<(state: BgmLoadState) => void>();
 
-  private readonly gameVolume = 0.45;
-  private readonly pausedVolume = 0.16;
+  private volumeScale = 0.7;
+
+  private getEffectiveGameVolume() {
+    return Math.max(0, Math.min(1, 0.65 * this.volumeScale));
+  }
+
+  private getEffectivePausedVolume() {
+    return Math.max(0, Math.min(1, 0.23 * this.volumeScale));
+  }
+
+  private getCurrentMp3Volume() {
+    return this.paused
+      ? this.getEffectivePausedVolume()
+      : this.getEffectiveGameVolume();
+  }
 
   private emitLoadState(next: BgmLoadState) {
     this.loadState = next;
@@ -145,7 +158,7 @@ class BgmManager {
           const audio = new Audio(objectUrl);
           audio.loop = true;
           audio.preload = 'auto';
-          audio.volume = this.paused ? this.pausedVolume : this.gameVolume;
+          audio.volume = this.getCurrentMp3Volume();
           audio.load();
           this.mp3Audio = audio;
         } else if (this.mp3Audio.src !== objectUrl) {
@@ -185,7 +198,7 @@ class BgmManager {
       const audio = new Audio(this.mp3ObjectUrl ?? gameMp3Url);
       audio.loop = true;
       audio.preload = 'auto';
-      audio.volume = this.paused ? this.pausedVolume : this.gameVolume;
+      audio.volume = this.getCurrentMp3Volume();
       this.mp3Audio = audio;
     }
     return this.mp3Audio;
@@ -203,7 +216,7 @@ class BgmManager {
       } else if (this.mode === 'game' && this.mp3NeedsUnlock) {
         const audio = this.ensureMp3();
         if (audio && audio.paused) {
-          audio.volume = this.paused ? this.pausedVolume : this.gameVolume;
+          audio.volume = this.getCurrentMp3Volume();
           audio
             .play()
             .then(() => {
@@ -256,7 +269,7 @@ class BgmManager {
       this.midiPlayer.stop();
       const audio = this.ensureMp3();
       if (audio && this.enabled) {
-        audio.volume = this.paused ? this.pausedVolume : this.gameVolume;
+        audio.volume = this.getCurrentMp3Volume();
         audio
           .play()
           .then(() => {
@@ -284,7 +297,7 @@ class BgmManager {
     const audio = this.ensureMp3();
     if (audio) {
       audio.currentTime = 0;
-      audio.volume = this.gameVolume;
+      audio.volume = this.getEffectiveGameVolume();
       if (this.enabled) {
         audio
           .play()
@@ -301,7 +314,15 @@ class BgmManager {
   public setPaused(paused: boolean) {
     this.paused = paused;
     if (this.mp3Audio) {
-      this.mp3Audio.volume = paused ? this.pausedVolume : this.gameVolume;
+      this.mp3Audio.volume = this.getCurrentMp3Volume();
+    }
+  }
+
+  public setVolume(val: number) {
+    this.volumeScale = Math.max(0, Math.min(1, val));
+    this.midiPlayer.setVolume(Math.min(1, 0.6 * this.volumeScale));
+    if (this.mp3Audio) {
+      this.mp3Audio.volume = this.getCurrentMp3Volume();
     }
   }
 
@@ -314,7 +335,7 @@ class BgmManager {
     if (!val) {
       audio.pause();
     } else if (this.mode === 'game') {
-      audio.volume = this.paused ? this.pausedVolume : this.gameVolume;
+      audio.volume = this.getCurrentMp3Volume();
       audio
         .play()
         .then(() => {
