@@ -1,4 +1,5 @@
 import {quizCategories} from '../../new_quizData';
+import {readProgress} from './progress';
 import {Category, CourseId, Subcategory, TermData} from './types';
 
 export interface QuizQuestion {
@@ -49,6 +50,7 @@ function shuffleArray<T>(items: T[]): T[] {
 export function pickNextQuizQuestion(
   usedIds: Set<string>,
   courseId: CourseId = 'orbital',
+  revengeMode = false,
 ): QuizQuestion {
   const allowedCatIds = COURSE_CATEGORY_IDS[courseId] ?? ['1', '2', '3'];
   const courseEntries = ALL_ENTRIES.filter((entry) =>
@@ -66,7 +68,42 @@ export function pickNextQuizQuestion(
     pool = effectiveEntries;
   }
 
-  const picked = pool[Math.floor(Math.random() * pool.length)];
+  let picked: QuizTermEntry;
+  if (revengeMode) {
+    const progress = readProgress();
+    const weighted = pool
+      .map((entry) => {
+        const solved = progress.solvedTermCounts[entry.term.id] ?? 0;
+        const wrong = progress.wrongTermCounts[entry.term.id] ?? 0;
+        const isUnsolved = solved === 0;
+        const hasWrong = wrong > 0;
+        if (!isUnsolved && !hasWrong) {
+          return {entry, weight: 0};
+        }
+        const netDifficulty = Math.max(0, wrong - solved);
+        const weight =
+          (isUnsolved ? 5 : 0) + wrong * 4 + netDifficulty * 3;
+        return {entry, weight};
+      })
+      .filter((item) => item.weight > 0);
+
+    if (weighted.length > 0) {
+      const totalWeight = weighted.reduce((sum, item) => sum + item.weight, 0);
+      let roll = Math.random() * totalWeight;
+      picked = weighted[weighted.length - 1].entry;
+      for (const item of weighted) {
+        roll -= item.weight;
+        if (roll <= 0) {
+          picked = item.entry;
+          break;
+        }
+      }
+    } else {
+      picked = pool[Math.floor(Math.random() * pool.length)];
+    }
+  } else {
+    picked = pool[Math.floor(Math.random() * pool.length)];
+  }
   usedIds.add(String(picked.term.id));
 
   const descriptions =

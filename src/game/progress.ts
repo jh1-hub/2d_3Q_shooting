@@ -6,6 +6,7 @@ export interface PlayerProgress {
   enteredEndless: boolean;
   solvedTermIds: number[];
   solvedTermCounts: Record<number, number>;
+  wrongTermCounts: Record<number, number>;
 }
 
 const PROGRESS_KEY = 'arrow01_progress_v1';
@@ -16,16 +17,23 @@ const DEFAULT_PROGRESS: PlayerProgress = {
   enteredEndless: false,
   solvedTermIds: [],
   solvedTermCounts: {},
+  wrongTermCounts: {},
 };
 
 export function readProgress(): PlayerProgress {
   try {
     const raw = window.localStorage.getItem(PROGRESS_KEY);
     if (!raw) {
-      return {...DEFAULT_PROGRESS, solvedTermIds: [], solvedTermCounts: {}};
+      return {
+        ...DEFAULT_PROGRESS,
+        solvedTermIds: [],
+        solvedTermCounts: {},
+        wrongTermCounts: {},
+      };
     }
     const parsed = JSON.parse(raw) as Partial<PlayerProgress>;
     const counts: Record<number, number> = {};
+    const wrongCounts: Record<number, number> = {};
 
     if (
       parsed.solvedTermCounts &&
@@ -41,6 +49,24 @@ export function readProgress(): PlayerProgress {
           val >= 1
         ) {
           counts[id] = Math.floor(val);
+        }
+      }
+    }
+
+    if (
+      parsed.wrongTermCounts &&
+      typeof parsed.wrongTermCounts === 'object'
+    ) {
+      for (const [key, val] of Object.entries(parsed.wrongTermCounts)) {
+        const id = Number(key);
+        if (
+          Number.isInteger(id) &&
+          id > 0 &&
+          typeof val === 'number' &&
+          Number.isFinite(val) &&
+          val >= 1
+        ) {
+          wrongCounts[id] = Math.floor(val);
         }
       }
     }
@@ -66,9 +92,15 @@ export function readProgress(): PlayerProgress {
       enteredEndless: Boolean(parsed.enteredEndless),
       solvedTermIds,
       solvedTermCounts: counts,
+      wrongTermCounts: wrongCounts,
     };
   } catch {
-    return {...DEFAULT_PROGRESS, solvedTermIds: [], solvedTermCounts: {}};
+    return {
+      ...DEFAULT_PROGRESS,
+      solvedTermIds: [],
+      solvedTermCounts: {},
+      wrongTermCounts: {},
+    };
   }
 }
 
@@ -129,6 +161,24 @@ export function recordSolvedTerm(termId: number): PlayerProgress {
     ...current,
     solvedTermCounts: nextCounts,
     solvedTermIds,
+  };
+  writeProgress(next);
+  return next;
+}
+
+export function recordWrongTerm(termId: number): PlayerProgress {
+  const current = readProgress();
+  if (!Number.isInteger(termId) || termId <= 0) {
+    return current;
+  }
+  const prevWrong = current.wrongTermCounts[termId] ?? 0;
+  const nextWrongCounts: Record<number, number> = {
+    ...current.wrongTermCounts,
+    [termId]: prevWrong + 1,
+  };
+  const next: PlayerProgress = {
+    ...current,
+    wrongTermCounts: nextWrongCounts,
   };
   writeProgress(next);
   return next;

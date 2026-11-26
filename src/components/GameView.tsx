@@ -107,6 +107,7 @@ export const GameView: React.FC = () => {
   const [selectedCourse, setSelectedCourse] = useState<CourseId>('neon_city');
   const [selectedDifficulty, setSelectedDifficulty] =
     useState<DifficultyMode>('normal');
+  const [revengeMode, setRevengeMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [highScoresOpen, setHighScoresOpen] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
@@ -422,8 +423,10 @@ export const GameView: React.FC = () => {
       effectivePattern,
       selectedCourse,
       selectedDifficulty,
+      undefined,
+      revengeMode,
     );
-  }, [progress, selectedCourse, selectedDifficulty, selectedPattern]);
+  }, [progress, revengeMode, selectedCourse, selectedDifficulty, selectedPattern]);
 
   const toggleBgm = () => {
     setSettings((prev) => ({...prev, bgmEnabled: !prev.bgmEnabled}));
@@ -1292,6 +1295,26 @@ export const GameView: React.FC = () => {
                     HARD
                   </button>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => setRevengeMode((prev) => !prev)}
+                  aria-pressed={revengeMode}
+                  className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-mono font-bold rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                    revengeMode
+                      ? 'bg-amber-500/20 border-amber-400 text-amber-300 shadow-[0_0_12px_rgba(245,158,11,0.25)]'
+                      : 'bg-slate-950/90 border-slate-800 text-slate-400 hover:text-amber-300 hover:border-amber-400/50'
+                  }`}
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>REVENGE</span>
+                </button>
+
+                {revengeMode && (
+                  <span className="text-[11px] font-mono text-amber-300">
+                    未回答・苦手優先
+                  </span>
+                )}
 
                 {selectedDifficulty === 'hard' && (
                   <span className="text-[11px] font-mono text-rose-300">

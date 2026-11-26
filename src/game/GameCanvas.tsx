@@ -1,6 +1,6 @@
 import React, {useEffect, useRef} from 'react';
 import {COURSES, ENEMIES, UPGRADE_PATTERNS, WEAPONS} from './data';
-import {recordSolvedTerm} from './progress';
+import {recordSolvedTerm, recordWrongTerm} from './progress';
 import {pickNextQuizQuestion, QuizQuestion} from './quizData';
 import {synthAudio} from './sound';
 import {
@@ -288,6 +288,7 @@ export interface GameEngineHandle {
     courseId: CourseId,
     difficulty?: DifficultyMode,
     debugConfig?: DebugRunConfig,
+    revengeMode?: boolean,
   ) => void;
   enterEndlessMode: () => void;
   finalizeRunToTitle: () => void;
@@ -370,6 +371,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     waveCount: 0,
     courseId: 'neon_city' as CourseId,
     difficulty: 'normal' as DifficultyMode,
+    revengeMode: false,
     patternId: 'missile_guard' as UpgradePatternId,
     upgradeIndex: 0,
     claimedShieldSteps: new Set<number>(),
@@ -489,6 +491,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         courseId: CourseId,
         difficulty: DifficultyMode = 'normal',
         debugConfig?: DebugRunConfig,
+        revengeMode = false,
       ) => {
         synthAudio.unlock();
         const s = simRef.current;
@@ -496,6 +499,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         s.waveCount = 0;
         s.courseId = courseId;
         s.difficulty = difficulty;
+        s.revengeMode = revengeMode;
         s.patternId = patternId;
         s.upgradeIndex = 0;
         s.claimedShieldSteps.clear();
@@ -559,7 +563,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         s.quizAnsweredCorrect = 0;
         s.quizTotalAnswered = 0;
         s.quizPhase = 'selecting';
-        s.quizQuestion = pickNextQuizQuestion(s.usedQuizIds, courseId);
+        s.quizQuestion = pickNextQuizQuestion(
+          s.usedQuizIds,
+          courseId,
+          s.revengeMode,
+        );
         s.quizTimer = QUIZ_TIME_LIMIT_SEC;
         s.quizPrepareTimer = 0;
         s.quizSelectLockTimer = 0.35;
@@ -663,7 +671,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         s.endingPhase = 'none';
         s.endingTimer = 0;
         s.quizPhase = 'selecting';
-        s.quizQuestion = pickNextQuizQuestion(s.usedQuizIds, s.courseId);
+        s.quizQuestion = pickNextQuizQuestion(
+          s.usedQuizIds,
+          s.courseId,
+          s.revengeMode,
+        );
         s.quizTimer = QUIZ_TIME_LIMIT_SEC;
         s.quizPrepareTimer = 0;
         s.quizSelectLockTimer = 0.35;
@@ -1317,7 +1329,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       boss.shieldIntact = true;
       boss.shieldShatterTimer = 0;
       boss.shieldShards = [];
-      boss.quizQuestion = pickNextQuizQuestion(s.usedQuizIds, s.courseId);
+      boss.quizQuestion = pickNextQuizQuestion(
+        s.usedQuizIds,
+        s.courseId,
+        s.revengeMode,
+      );
       boss.quizTargetDamage = [0, 0, 0, 0];
       boss.quizNoHitTimers = [0, 0, 0, 0];
       boss.quizSelectedIdx = null;
@@ -1963,7 +1979,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       s.warningTimer = 0;
       s.warningText = null;
       s.quizPhase = 'prepare';
-      s.quizQuestion = pickNextQuizQuestion(s.usedQuizIds, s.courseId);
+      s.quizQuestion = pickNextQuizQuestion(
+        s.usedQuizIds,
+        s.courseId,
+        s.revengeMode,
+      );
       s.quizTimer = QUIZ_TIME_LIMIT_SEC;
       s.quizPrepareTimer = 0.65;
       s.quizSelectLockTimer = 0.2;
@@ -2251,6 +2271,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             if (timedOut) {
               s.quizResult = 'timeout';
               s.itemsEnabled = false;
+              if (q) {
+                recordWrongTerm(q.termId);
+              }
               synthAudio.playQuizWrong();
               applyFlatScoreDelta(-1000);
               s.floatingTexts.push({
@@ -2284,6 +2307,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             } else {
               s.quizResult = 'wrong';
               s.itemsEnabled = false;
+              if (q) {
+                recordWrongTerm(q.termId);
+              }
               synthAudio.playQuizWrong();
               spawnParticles(p.x, p.y, '#F43F5E', 20, 220, true);
               applyFlatScoreDelta(-1000);
@@ -2884,6 +2910,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
                     });
                     boss.quizFeedbackTimer = 1.6;
                   } else {
+                    recordWrongTerm(q.termId);
                     boss.quizResult = 'wrong';
                     boss.piercingQuizActive = true;
                     boss.consecutiveQuizMisses += 1;
@@ -3386,6 +3413,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             if (boss.quizTimer === 0) {
               // 60秒経過しても破壊できなかった場合は強制で誤答扱い（シールドは破壊できず残る）
               boss.quizSelectedIdx = null;
+              if (boss.quizQuestion) {
+                recordWrongTerm(boss.quizQuestion.termId);
+              }
               s.quizTotalAnswered += 1;
               boss.quizResult = 'timeout';
               boss.piercingQuizActive = true;
