@@ -1846,27 +1846,58 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         });
         synthAudio.playShoot('ripple');
       } else if (weaponId === 'missile') {
+        const isBalanceC = s.patternId === 'balance';
         const isEvolvedA =
           s.hiddenEvolutionUnlocked && s.patternId === 'missile_guard';
-        const dirs = [-1, 1];
-        for (const dir of dirs) {
-          s.bullets.push({
-            id: s.nextId++,
-            x: p.x + 14,
-            y: p.y + dir * 12,
-            vx: tpl.bulletSpeed * 0.72,
-            vy: dir * 290,
-            damage: isEvolvedA ? Math.round(dmg * 1.18) : dmg,
-            radius: (isEvolvedA ? 7.5 : 6.5) * sz,
-            color: tpl.color,
-            kind: 'missile',
-            pierce: 1,
-            hitIds: new Set(),
-            age: 0,
-            maxAge: isEvolvedA ? 2.8 : 2.2,
-            homing: isEvolvedA,
-            evolved: isEvolvedA,
-          });
+        if (isBalanceC) {
+          const isEvolvedC = s.hiddenEvolutionUnlocked;
+          const salvos = [
+            {dir: -1, xOff: 16, yOff: -10, vxMult: 0.78, vy: -240},
+            {dir: 1, xOff: 16, yOff: 10, vxMult: 0.78, vy: 240},
+            {dir: -1, xOff: 6, yOff: -18, vxMult: 0.56, vy: -350},
+            {dir: 1, xOff: 6, yOff: 18, vxMult: 0.56, vy: 350},
+          ];
+          const cMissileDmg = Math.round(dmg * 0.8);
+          for (const m of salvos) {
+            s.bullets.push({
+              id: s.nextId++,
+              x: p.x + m.xOff,
+              y: p.y + m.yOff,
+              vx: tpl.bulletSpeed * m.vxMult,
+              vy: m.vy,
+              damage: cMissileDmg,
+              radius: (isEvolvedC ? 7.2 : 6.5) * sz,
+              color: tpl.color,
+              kind: 'missile',
+              pierce: 1,
+              hitIds: new Set(),
+              age: 0,
+              maxAge: 2.6,
+              homing: true,
+              evolved: isEvolvedC,
+            });
+          }
+        } else {
+          const dirs = [-1, 1];
+          for (const dir of dirs) {
+            s.bullets.push({
+              id: s.nextId++,
+              x: p.x + 14,
+              y: p.y + dir * 12,
+              vx: tpl.bulletSpeed * 0.72,
+              vy: dir * 290,
+              damage: isEvolvedA ? Math.round(dmg * 1.18) : dmg,
+              radius: (isEvolvedA ? 7.5 : 6.5) * sz,
+              color: tpl.color,
+              kind: 'missile',
+              pierce: 1,
+              hitIds: new Set(),
+              age: 0,
+              maxAge: isEvolvedA ? 2.8 : 2.2,
+              homing: isEvolvedA,
+              evolved: isEvolvedA,
+            });
+          }
         }
         synthAudio.playShoot('missile');
       } else if (weaponId === 'orbit') {

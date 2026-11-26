@@ -214,13 +214,6 @@ export const GameView: React.FC = () => {
   const [expandedRuleIds, setExpandedRuleIds] = useState<
     Record<string, boolean>
   >({});
-  const [debugPanelOpen, setDebugPanelOpen] = useState(false);
-  const [debugPattern, setDebugPattern] =
-    useState<UpgradePatternId>('missile_guard');
-  const [debugDifficulty, setDebugDifficulty] =
-    useState<DifficultyMode>('normal');
-  const [debugStartStage, setDebugStartStage] = useState(1);
-  const [debugWeaponLevel, setDebugWeaponLevel] = useState(1);
   const [shipSectionOpen, setShipSectionOpen] = useState(() =>
     typeof window === 'undefined'
       ? true
@@ -431,27 +424,6 @@ export const GameView: React.FC = () => {
       selectedDifficulty,
     );
   }, [progress, selectedCourse, selectedDifficulty, selectedPattern]);
-
-  const startDebugRun = useCallback(() => {
-    if (bgmManager.getLoadState().status !== 'ready') return;
-    setSettingsOpen(false);
-    bgmManager.restartGameTrack();
-    engineRef.current?.startNewRun(
-      debugPattern,
-      selectedCourse,
-      debugDifficulty,
-      {
-        startStage: debugStartStage,
-        weaponPowerLevel: debugWeaponLevel,
-      },
-    );
-  }, [
-    debugDifficulty,
-    debugPattern,
-    debugStartStage,
-    debugWeaponLevel,
-    selectedCourse,
-  ]);
 
   const toggleBgm = () => {
     setSettings((prev) => ({...prev, bgmEnabled: !prev.bgmEnabled}));
@@ -1770,163 +1742,6 @@ export const GameView: React.FC = () => {
                       </div>
                     );
                   })}
-                </div>
-
-                {/* Debug Mode (collapsible button, easily hideable later) */}
-                <div className="bg-slate-950/70 border border-amber-500/30 rounded-lg p-3 flex flex-col gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setDebugPanelOpen((prev) => !prev)}
-                    aria-expanded={debugPanelOpen}
-                    className="w-full flex items-center justify-between gap-2 text-left text-xs font-mono font-semibold text-amber-300 hover:text-amber-200 transition-colors cursor-pointer"
-                  >
-                    <span>デバッグモード</span>
-                    {debugPanelOpen ? (
-                      <ChevronDown className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                    ) : (
-                      <ChevronRight className="w-3.5 h-3.5 text-amber-400/80 shrink-0" />
-                    )}
-                  </button>
-
-                  {debugPanelOpen && (
-                    <div className="flex flex-col gap-3.5 pt-2.5 border-t border-slate-800">
-                      <div>
-                        <div className="text-xs text-slate-200 font-medium mb-1.5">
-                          使用機体（未解放機体も選択可）
-                        </div>
-                        <div className="grid grid-cols-4 gap-1.5">
-                          {(
-                            Object.keys(UPGRADE_PATTERNS) as UpgradePatternId[]
-                          ).map((pid) => {
-                            const pat = UPGRADE_PATTERNS[pid];
-                            const active = debugPattern === pid;
-                            return (
-                              <button
-                                key={pid}
-                                type="button"
-                                onClick={() => setDebugPattern(pid)}
-                                className={`px-2 py-1.5 rounded-md border font-mono text-[11px] font-bold transition-colors cursor-pointer ${
-                                  active
-                                    ? 'bg-slate-800 border-cyan-400 text-white'
-                                    : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
-                                }`}
-                                style={active ? {color: pat.accent} : undefined}
-                              >
-                                {pat.name}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="text-xs text-slate-200 font-medium mb-1.5">
-                          難易度
-                        </div>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => setDebugDifficulty('normal')}
-                            className={`py-1.5 rounded-md border font-mono text-xs font-bold transition-colors cursor-pointer ${
-                              debugDifficulty === 'normal'
-                                ? 'bg-cyan-400 border-cyan-300 text-slate-950'
-                                : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-slate-200'
-                            }`}
-                          >
-                            NORMAL
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setDebugDifficulty('hard')}
-                            className={`py-1.5 rounded-md border font-mono text-xs font-bold transition-colors cursor-pointer ${
-                              debugDifficulty === 'hard'
-                                ? 'bg-rose-500 border-rose-400 text-white'
-                                : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:text-rose-300'
-                            }`}
-                          >
-                            HARD
-                          </button>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5 text-xs">
-                          <span className="text-slate-200 font-medium">
-                            開始ステージ
-                          </span>
-                          <span className="font-mono font-bold text-amber-300 tabular-nums">
-                            {debugStartStage >= 9
-                              ? 'ENDLESS (STAGE 9)'
-                              : `STAGE ${debugStartStage}`}
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min="1"
-                          max="9"
-                          step="1"
-                          value={debugStartStage}
-                          onChange={(e) =>
-                            setDebugStartStage(parseInt(e.target.value, 10))
-                          }
-                          aria-label="デバッグ開始ステージ"
-                          className="w-full accent-amber-400 cursor-pointer"
-                        />
-                        <div className="flex justify-between text-[10px] font-mono text-slate-500 mt-0.5">
-                          <span>1</span>
-                          <span>4</span>
-                          <span>8</span>
-                          <span>ENDLESS</span>
-                        </div>
-                      </div>
-
-                      <div>
-                        <div className="flex items-center justify-between mb-1.5 text-xs">
-                          <span className="text-slate-200 font-medium">
-                            自機の強化状態
-                          </span>
-                          <span className="font-mono font-bold text-cyan-300 tabular-nums">
-                            {debugWeaponLevel >= 11
-                              ? 'LV 10 ★ 隠し強化'
-                              : `LV ${debugWeaponLevel}`}
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min="1"
-                          max="11"
-                          step="1"
-                          value={debugWeaponLevel}
-                          onChange={(e) =>
-                            setDebugWeaponLevel(parseInt(e.target.value, 10))
-                          }
-                          aria-label="デバッグ自機強化状態"
-                          className="w-full accent-cyan-400 cursor-pointer"
-                        />
-                        <div className="flex justify-between text-[10px] font-mono text-slate-500 mt-0.5">
-                          <span>LV 1</span>
-                          <span>LV 5</span>
-                          <span>LV 10</span>
-                          <span>★ 隠し強化</span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-3 pt-1">
-                        <span className="text-[11px] font-mono text-slate-400">
-                          {UPGRADE_PATTERNS[debugPattern].name} ·{' '}
-                          {debugDifficulty.toUpperCase()}
-                        </span>
-                        <button
-                          type="button"
-                          disabled={!isBgmReady}
-                          onClick={startDebugRun}
-                          className="px-4 py-2 rounded-md bg-amber-400 hover:bg-amber-300 disabled:bg-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed text-slate-950 font-mono text-xs font-bold transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                        >
-                          {isBgmReady ? 'デバッグ出撃' : 'BGM LOADING...'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
