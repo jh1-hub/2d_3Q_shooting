@@ -481,6 +481,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     activePointerId: null as number | null,
     lastPointerX: 0,
     lastPointerY: 0,
+    lastMoveTime: 0,
+    flickVx: 0,
+    flickVy: 0,
+    glideVx: 0,
+    glideVy: 0,
+    tapFireTimer: 0,
     pointerDown: false,
   });
 
@@ -755,19 +761,49 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    const isInteractiveTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      return Boolean(
+        el?.closest(
+          'button, input, select, textarea, a, [role="button"], [data-ui-control]',
+        ),
+      );
+    };
+
+    const getCanvasUnitsPerCssPx = () => {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        return {scaleX: 1, scaleY: 1};
+      }
+      const renderedScale = Math.min(
+        rect.width / LOGICAL_W,
+        rect.height / LOGICAL_H,
+      );
+      if (renderedScale > 0) {
+        const inv = 1 / renderedScale;
+        return {scaleX: inv, scaleY: inv};
+      }
+      return {
+        scaleX: LOGICAL_W / rect.width,
+        scaleY: LOGICAL_H / rect.height,
+      };
+    };
+
     const onPointerDown = (e: PointerEvent) => {
       if (gameStateRef.current !== 'PLAYING') return;
+      if (isInteractiveTarget(e.target)) return;
       synthAudio.unlock();
       if (inputRef.current.activePointerId === null) {
         inputRef.current.activePointerId = e.pointerId;
         inputRef.current.lastPointerX = e.clientX;
         inputRef.current.lastPointerY = e.clientY;
+        inputRef.current.lastMoveTime = performance.now();
+        inputRef.current.flickVx = 0;
+        inputRef.current.flickVy = 0;
+        inputRef.current.glideVx = 0;
+        inputRef.current.glideVy = 0;
+        inputRef.current.tapFireTimer = 0.16;
         inputRef.current.pointerDown = true;
-        try {
-          canvas.setPointerCapture(e.pointerId);
-        } catch {
-          // ignore
-        }
       }
     };
 
@@ -783,19 +819,33 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ) {
         return;
       }
-      const rect = canvas.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
 
-      const scaleX = LOGICAL_W / rect.width;
-      const scaleY = LOGICAL_H / rect.height;
+      const {scaleX, scaleY} = getCanvasUnitsPerCssPx();
       const sens =
         e.pointerType === 'touch' ? settingsRef.current.touchSensitivity : 1.05;
 
-      const dx = (e.clientX - inputRef.current.lastPointerX) * scaleX * sens;
-      const dy = (e.clientY - inputRef.current.lastPointerY) * scaleY * sens;
+      const coalesced =
+        typeof e.getCoalescedEvents === 'function'
+          ? e.getCoalescedEvents()
+          : [];
+      const samples = coalesced.length > 0 ? coalesced : [e];
+      const latest = samples[samples.length - 1];
 
-      inputRef.current.lastPointerX = e.clientX;
-      inputRef.current.lastPointerY = e.clientY;
+      const totalDx =
+        (latest.clientX - inputRef.current.lastPointerX) * scaleX * sens;
+      const totalDy =
+        (latest.clientY - inputRef.current.lastPointerY) * scaleY * sens;
+
+      const now = performance.now();
+      const dtMs = Math.max(4, now - inputRef.current.lastMoveTime);
+      const dtSec = dtMs / 1000;
+      const instVx = totalDx / dtSec;
+      const instVy = totalDy / dtSec;
+      inputRef.current.flickVx = inputRef.current.flickVx * 0.45 + instVx * 0.55;
+      inputRef.current.flickVy = inputRef.current.flickVy * 0.45 + instVy * 0.55;
+      inputRef.current.lastMoveTime = now;
+      inputRef.current.lastPointerX = latest.clientX;
+      inputRef.current.lastPointerY = latest.clientY;
 
       const p = simRef.current.player;
       const isSelecting = simRef.current.quizPhase === 'selecting';
@@ -823,8 +873,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         : isBossQuizActive
           ? bossQuizLayout.tops[3] + bossQuizLayout.height - 10
           : LOGICAL_H - 48;
-      p.x = Math.max(44, Math.min(maxX, p.x + dx));
-      p.y = Math.max(minY, Math.min(maxY, p.y + dy));
+      p.x = Math.max(44, Math.min(maxX, p.x + totalDx));
+      p.y = Math.max(minY, Math.min(maxY, p.y + totalDy));
       if (isBossQuizActive) {
         p.x = Math.min(
           p.x,
@@ -840,20 +890,39 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     const onPointerUp = (e: PointerEvent) => {
       if (inputRef.current.activePointerId === e.pointerId) {
+        const dtSinceMove = performance.now() - inputRef.current.lastMoveTime;
+        const speed = Math.hypot(
+          inputRef.current.flickVx,
+          inputRef.current.flickVy,
+        );
+        if (gameStateRef.current === 'PLAYING' && dtSinceMove < 120 && speed > 240) {
+          const maxGlide = 1200;
+          const clampScale = speed > maxGlide ? maxGlide / speed : 1;
+          inputRef.current.glideVx = inputRef.current.flickVx * clampScale;
+          inputRef.current.glideVy = inputRef.current.flickVy * clampScale;
+        }
         inputRef.current.activePointerId = null;
         inputRef.current.pointerDown = false;
       }
     };
 
-    canvas.addEventListener('pointerdown', onPointerDown);
-    canvas.addEventListener('pointermove', onPointerMove);
-    canvas.addEventListener('pointerup', onPointerUp);
-    canvas.addEventListener('pointercancel', onPointerUp);
+    const onTouchMove = (e: TouchEvent) => {
+      if (gameStateRef.current !== 'PLAYING') return;
+      if (isInteractiveTarget(e.target)) return;
+      e.preventDefault();
+    };
+
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    window.addEventListener('touchmove', onTouchMove, {passive: false});
     return () => {
-      canvas.removeEventListener('pointerdown', onPointerDown);
-      canvas.removeEventListener('pointermove', onPointerMove);
-      canvas.removeEventListener('pointerup', onPointerUp);
-      canvas.removeEventListener('pointercancel', onPointerUp);
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+      window.removeEventListener('touchmove', onTouchMove);
     };
   }, []);
 
@@ -2191,10 +2260,28 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           if (keys.has('ArrowRight') || keys.has('KeyD')) kx += 1;
           if (keys.has('ArrowUp') || keys.has('KeyW')) ky -= 1;
           if (keys.has('ArrowDown') || keys.has('KeyS')) ky += 1;
+          if (inputRef.current.tapFireTimer > 0) {
+            inputRef.current.tapFireTimer = Math.max(
+              0,
+              inputRef.current.tapFireTimer - dt,
+            );
+          }
+
           if (kx !== 0 || ky !== 0) {
             const len = Math.hypot(kx, ky);
             p.x += (kx / len) * p.speed * dt;
             p.y += (ky / len) * p.speed * dt;
+            inputRef.current.glideVx = 0;
+            inputRef.current.glideVy = 0;
+          } else if (
+            Math.abs(inputRef.current.glideVx) > 6 ||
+            Math.abs(inputRef.current.glideVy) > 6
+          ) {
+            p.x += inputRef.current.glideVx * dt;
+            p.y += inputRef.current.glideVy * dt;
+            const damp = Math.exp(-dt * 15);
+            inputRef.current.glideVx *= damp;
+            inputRef.current.glideVy *= damp;
           }
           p.x = Math.max(44, Math.min(GATE_ENTRY_X + 20, p.x));
           p.y = Math.max(
@@ -2215,7 +2302,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             settingsRef.current.autoShot ||
             keys.has('Space') ||
             keys.has('KeyZ') ||
-            inputRef.current.pointerDown;
+            inputRef.current.pointerDown ||
+            inputRef.current.tapFireTimer > 0;
           const laserLv = s.weapons.laser ?? 0;
           const hasStreamLaser =
             laserLv >= 4 ||
@@ -2517,12 +2605,20 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       }
 
       const keys = inputRef.current.keys;
+      if (inputRef.current.tapFireTimer > 0) {
+        inputRef.current.tapFireTimer = Math.max(
+          0,
+          inputRef.current.tapFireTimer - dt,
+        );
+      }
       const isBossQuizPush = Boolean(s.boss && s.boss.quizState === 'push');
       const bossQuizStartY = getBossQuizStartY(externalQuizRef.current);
       if (isBossQuizPush) {
         // 押し戻し中：自機を左側・BとCの隙間中央へ戻し、初期位置から誤射しないようにする
         p.x += (BOSS_QUIZ_START_X - p.x) * Math.min(1, dt * 8.0);
         p.y += (bossQuizStartY - p.y) * Math.min(1, dt * 8.5);
+        inputRef.current.glideVx = 0;
+        inputRef.current.glideVy = 0;
       } else {
         let kx = 0;
         let ky = 0;
@@ -2534,6 +2630,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           const len = Math.hypot(kx, ky);
           p.x += (kx / len) * p.speed * dt;
           p.y += (ky / len) * p.speed * dt;
+          inputRef.current.glideVx = 0;
+          inputRef.current.glideVy = 0;
+        } else if (
+          Math.abs(inputRef.current.glideVx) > 6 ||
+          Math.abs(inputRef.current.glideVy) > 6
+        ) {
+          p.x += inputRef.current.glideVx * dt;
+          p.y += inputRef.current.glideVy * dt;
+          const damp = Math.exp(-dt * 15);
+          inputRef.current.glideVx *= damp;
+          inputRef.current.glideVy *= damp;
         }
         if (isBossShieldPush) {
           p.x -= 450 * dt;
@@ -2570,7 +2677,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         settingsRef.current.autoShot ||
         keys.has('Space') ||
         keys.has('KeyZ') ||
-        inputRef.current.pointerDown;
+        inputRef.current.pointerDown ||
+        inputRef.current.tapFireTimer > 0;
       const isFiring =
         s.bossDyingTimer === 0 &&
         (!isBossQuizActive || isBossQuizAiming) &&
@@ -6145,6 +6253,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (gameStateRef.current === 'PLAYING') {
         updateSimulation(dt);
       } else {
+        inputRef.current.activePointerId = null;
+        inputRef.current.pointerDown = false;
+        inputRef.current.glideVx = 0;
+        inputRef.current.glideVy = 0;
+        inputRef.current.tapFireTimer = 0;
         s.bgOffset += 55 * dt;
       }
 

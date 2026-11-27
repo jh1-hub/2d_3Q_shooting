@@ -10,6 +10,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  RotateCw,
   Settings,
   Shield,
   Smartphone,
@@ -56,6 +57,21 @@ import {
 } from './WeaponVisuals';
 
 const CURSOR_IDLE_HIDE_MS = 2000;
+
+function isMobileViewportDevice(): boolean {
+  if (typeof window === 'undefined') return false;
+  return (
+    window.matchMedia('(pointer: coarse)').matches ||
+    /Android|iPhone|iPod|Mobile/i.test(navigator.userAgent)
+  );
+}
+
+function detectMobilePortrait(): boolean {
+  if (typeof window === 'undefined') return false;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  return isMobileViewportDevice() && vh > vw && vw < 768;
+}
 
 function renderPhraseWithNaturalBreaks(phrase: string, keyPrefix: string) {
   const chunks = phrase.split(/(?<=・)|(?=（|装備|増設|配備|\sLv)/);
@@ -227,6 +243,9 @@ export const GameView: React.FC = () => {
   });
   const {isInstallable, isInstalled, isIOS, install} = usePWAInstall();
 
+  const [isMobilePortrait, setIsMobilePortrait] = useState<boolean>(
+    detectMobilePortrait,
+  );
   const [externalQuizRoom, setExternalQuizRoom] = useState<'none' | 'compact' | 'roomy'>(() => {
     if (typeof window === 'undefined') return 'none';
     const vw = window.innerWidth;
@@ -243,6 +262,7 @@ export const GameView: React.FC = () => {
       const gameH = Math.min(vh, (vw * 9) / 16);
       const spare = vh - gameH;
       setExternalQuizRoom(spare >= 350 ? 'roomy' : spare >= 220 ? 'compact' : 'none');
+      setIsMobilePortrait(detectMobilePortrait());
     };
     checkRoom();
     window.addEventListener('resize', checkRoom);
@@ -252,6 +272,12 @@ export const GameView: React.FC = () => {
       window.removeEventListener('orientationchange', checkRoom);
     };
   }, []);
+
+  useEffect(() => {
+    if (isMobilePortrait && gameState === 'PLAYING') {
+      setGameState('PAUSED');
+    }
+  }, [isMobilePortrait, gameState]);
 
   const [hud, setHud] = useState<HudSnapshot>({
     shield: 3,
@@ -410,8 +436,38 @@ export const GameView: React.FC = () => {
   const isBgmReady = bgmLoad.status === 'ready';
   const anyAudioEnabled = settings.bgmEnabled || settings.sfxEnabled;
 
+  const tryLockLandscape = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    try {
+      const orientation = window.screen?.orientation as
+        | {lock?: (mode: string) => Promise<void>}
+        | undefined;
+      if (orientation?.lock) {
+        await orientation.lock('landscape');
+      }
+    } catch {
+      // Orientation lock requires fullscreen/PWA in many mobile browsers
+    }
+  }, []);
+
+  const requestLandscapeMode = useCallback(async () => {
+    if (typeof document !== 'undefined') {
+      try {
+        if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        }
+      } catch {
+        // Ignore fullscreen denial on unsupported browsers (e.g. iOS Safari)
+      }
+    }
+    await tryLockLandscape();
+  }, [tryLockLandscape]);
+
   const startSelectedRun = useCallback(() => {
     if (bgmManager.getLoadState().status !== 'ready') return;
+    if (isMobileViewportDevice()) {
+      void tryLockLandscape();
+    }
     const effectivePattern = isPatternUnlocked(selectedPattern, progress)
       ? selectedPattern
       : 'missile_guard';
@@ -426,7 +482,14 @@ export const GameView: React.FC = () => {
       undefined,
       revengeMode,
     );
-  }, [progress, revengeMode, selectedCourse, selectedDifficulty, selectedPattern]);
+  }, [
+    progress,
+    revengeMode,
+    selectedCourse,
+    selectedDifficulty,
+    selectedPattern,
+    tryLockLandscape,
+  ]);
 
   const toggleBgm = () => {
     setSettings((prev) => ({...prev, bgmEnabled: !prev.bgmEnabled}));
@@ -560,7 +623,7 @@ export const GameView: React.FC = () => {
         </div>
 
         {/* Center: Stage / Endless & Auto-Upgrade Meter */}
-        <div className="hidden sm:flex flex-col items-center w-64 md:w-72">
+        <div className="hidden sm:flex flex-col items-center w-48 md:w-64 lg:w-72">
           <div className="flex items-center gap-2 text-xs font-mono tabular-nums text-slate-200 mb-1">
             {hud.difficulty === 'hard' && (
               <span className="font-bold text-rose-400">HARD</span>
@@ -711,7 +774,9 @@ export const GameView: React.FC = () => {
         useExternalQuizLayout
           ? 'flex-col items-center justify-between'
           : 'items-center justify-center'
-      } ${cursorHidden ? 'hide-cursor' : ''}`}
+      } ${gameState === 'PLAYING' ? 'game-touch-surface' : ''} ${
+        cursorHidden ? 'hide-cursor' : ''
+      }`}
     >
       {/* External Top HUD & Question Panel when screen has vertical spare room (e.g. mobile portrait) */}
       {useExternalQuizLayout && (
@@ -1976,6 +2041,39 @@ export const GameView: React.FC = () => {
                 OK
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MOBILE PORTRAIT ROTATION PROMPT */}
+      {isMobilePortrait && (
+        <div className="fixed inset-0 z-50 bg-slate-950/96 backdrop-blur-md flex items-center justify-center p-6">
+          <div className="w-full max-w-sm bg-slate-900 border border-cyan-500/40 rounded-2xl p-6 flex flex-col items-center text-center gap-4 shadow-2xl">
+            <div className="relative flex items-center justify-center w-16 h-16 rounded-2xl bg-cyan-950/70 border border-cyan-400/40 text-cyan-300">
+              <Smartphone className="w-8 h-8 -rotate-90 transition-transform" />
+              <RotateCw className="w-4 h-4 text-cyan-200 absolute -top-1.5 -right-1.5 bg-slate-900 rounded-full p-0.5" />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <div className="font-mono text-[11px] font-bold tracking-[0.2em] text-cyan-400">
+                LANDSCAPE MODE REQUIRED
+              </div>
+              <h2 className="text-base font-bold text-white">
+                横画面にしてプレイしてください
+              </h2>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                スマートフォンでは横向き表示に対応しています。端末を横に回転させてください。
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                void requestLandscapeMode();
+              }}
+              className="w-full py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs tracking-wide transition-colors cursor-pointer flex items-center justify-center gap-2"
+            >
+              <RotateCw className="w-4 h-4" />
+              <span>横画面に切り替える</span>
+            </button>
           </div>
         </div>
       )}
