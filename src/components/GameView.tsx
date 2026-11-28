@@ -281,11 +281,6 @@ export const GameView: React.FC = () => {
     Boolean(getFullscreenElement()),
   );
   const [canFullscreen] = useState<boolean>(isFullscreenSupported);
-  const [viewportSize, setViewportSize] = useState<{width: number; height: number}>(() =>
-    typeof window === 'undefined'
-      ? {width: 1280, height: 720}
-      : {width: window.innerWidth, height: window.innerHeight},
-  );
   const [externalQuizRoom, setExternalQuizRoom] = useState<'none' | 'compact' | 'roomy'>(() => {
     if (typeof window === 'undefined') return 'none';
     const vw = window.innerWidth;
@@ -301,7 +296,6 @@ export const GameView: React.FC = () => {
       const vh = window.innerHeight;
       const gameH = Math.min(vh, (vw * 9) / 16);
       const spare = vh - gameH;
-      setViewportSize({width: vw, height: vh});
       setExternalQuizRoom(spare >= 350 ? 'roomy' : spare >= 220 ? 'compact' : 'none');
       const portrait = detectMobilePortrait();
       setIsMobilePortrait(portrait);
@@ -648,16 +642,11 @@ export const GameView: React.FC = () => {
   const useExternalQuizLayout =
     externalQuizRoom !== 'none' && gameState !== 'TITLE_MENU';
 
-  const useCompactPriorityQuiz =
+  const useOverlayPriorityQuiz =
     !useExternalQuizLayout &&
     gameState !== 'TITLE_MENU' &&
     hud.quizActive &&
-    Boolean(hud.quizQuestionText) &&
-    (isMobileViewportDevice() ||
-      viewportSize.height < 640 ||
-      viewportSize.width < 1024);
-
-  const useAnyExternalQuiz = useExternalQuizLayout || useCompactPriorityQuiz;
+    Boolean(hud.quizQuestionText);
 
   const quizTimerColor =
     hud.quizTimeRemaining <= 5
@@ -897,7 +886,7 @@ export const GameView: React.FC = () => {
   return (
     <div
       className={`relative w-screen h-[100dvh] bg-[#050811] overflow-hidden flex pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] ${
-        useAnyExternalQuiz
+        useExternalQuizLayout
           ? 'flex-col items-center justify-between'
           : 'items-center justify-center'
       } ${gameState === 'PLAYING' ? 'game-touch-surface' : ''} ${
@@ -1011,10 +1000,10 @@ export const GameView: React.FC = () => {
         </div>
       )}
 
-      {/* Priority Compact Question Header for Mobile Landscape & Short Viewports */}
-      {useCompactPriorityQuiz && (
-        <div className="w-full px-2.5 sm:px-4 pt-1.5 pb-1 shrink-0 z-20">
-          <div className="w-full max-w-4xl mx-auto bg-slate-900/95 border border-cyan-500/50 rounded-xl px-3 py-2 shadow-lg max-h-[44dvh] overflow-y-auto">
+      {/* Priority Top Overlay Question Banner (never resizes or shrinks the canvas) */}
+      {useOverlayPriorityQuiz && (
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 px-2.5 sm:px-4 pt-1.5 sm:pt-2.5 pl-[max(0.625rem,env(safe-area-inset-left))] pr-[max(0.625rem,env(safe-area-inset-right))]">
+          <div className="w-full max-w-4xl mx-auto bg-slate-950/90 backdrop-blur-sm border border-cyan-500/45 rounded-xl px-3 py-1.5 sm:py-2 shadow-xl">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2 min-w-0 text-[11px] font-mono">
                 <span
@@ -1032,9 +1021,16 @@ export const GameView: React.FC = () => {
                     : `QUIZ · ${hud.quizQuestionCategory}`}
                 </span>
                 {hud.quizMode === 'boss_shield' && (
-                  <span className="text-slate-400 truncate hidden sm:inline">
-                    {hud.quizQuestionCategory}
-                  </span>
+                  <>
+                    <span className="text-slate-400 truncate hidden sm:inline">
+                      {hud.quizQuestionCategory}
+                    </span>
+                    {hud.bossActive && (
+                      <span className="text-rose-300 font-semibold tabular-nums whitespace-nowrap hidden md:inline">
+                        · BOSS {Math.max(0, Math.ceil((hud.bossHp / Math.max(1, hud.bossMaxHp)) * 100))}%
+                      </span>
+                    )}
+                  </>
                 )}
               </div>
 
@@ -1069,67 +1065,69 @@ export const GameView: React.FC = () => {
                   </span>
                 )}
 
-                {canFullscreen && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void toggleFullscreen();
-                    }}
-                    aria-label={isFullscreen ? '全画面を解除' : '全画面表示'}
-                    className="p-1.5 rounded-md bg-slate-800/90 border border-slate-700 text-slate-200 hover:border-cyan-400 cursor-pointer"
-                  >
-                    {isFullscreen ? (
-                      <Minimize2 className="w-3.5 h-3.5 text-cyan-300" />
-                    ) : (
-                      <Maximize2 className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={toggleQuickMute}
-                  aria-label={anyAudioEnabled ? 'ミュート' : 'サウンド有効化'}
-                  className="p-1.5 rounded-md bg-slate-800/90 border border-slate-700 text-slate-200 hover:border-cyan-400 cursor-pointer"
-                >
-                  {anyAudioEnabled ? (
-                    <Volume2 className="w-3.5 h-3.5" />
-                  ) : (
-                    <VolumeX className="w-3.5 h-3.5 text-slate-500" />
+                <div className="pointer-events-auto flex items-center gap-1">
+                  {canFullscreen && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void toggleFullscreen();
+                      }}
+                      aria-label={isFullscreen ? '全画面を解除' : '全画面表示'}
+                      className="p-1 rounded-md bg-slate-800/90 border border-slate-700 text-slate-200 hover:border-cyan-400 cursor-pointer"
+                    >
+                      {isFullscreen ? (
+                        <Minimize2 className="w-3.5 h-3.5 text-cyan-300" />
+                      ) : (
+                        <Maximize2 className="w-3.5 h-3.5" />
+                      )}
+                    </button>
                   )}
-                </button>
 
-                {gameState !== 'GAME_OVER' && (
                   <button
                     type="button"
-                    onClick={() =>
-                      setGameState((prev) =>
-                        prev === 'PAUSED' ? 'PLAYING' : 'PAUSED',
-                      )
-                    }
-                    aria-label={gameState === 'PAUSED' ? '再開' : '一時停止'}
-                    className="p-1.5 rounded-md bg-slate-800/90 border border-slate-700 text-slate-200 hover:border-cyan-400 cursor-pointer"
+                    onClick={toggleQuickMute}
+                    aria-label={anyAudioEnabled ? 'ミュート' : 'サウンド有効化'}
+                    className="p-1 rounded-md bg-slate-800/90 border border-slate-700 text-slate-200 hover:border-cyan-400 cursor-pointer"
                   >
-                    {gameState === 'PAUSED' ? (
-                      <Play className="w-3.5 h-3.5 text-cyan-400" />
+                    {anyAudioEnabled ? (
+                      <Volume2 className="w-3.5 h-3.5" />
                     ) : (
-                      <Pause className="w-3.5 h-3.5" />
+                      <VolumeX className="w-3.5 h-3.5 text-slate-500" />
                     )}
                   </button>
-                )}
 
-                <button
-                  type="button"
-                  onClick={handleOpenSettings}
-                  aria-label="設定を開く"
-                  className="p-1.5 rounded-md bg-slate-800/90 border border-slate-700 text-slate-100 hover:border-cyan-400 cursor-pointer"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                </button>
+                  {gameState !== 'GAME_OVER' && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setGameState((prev) =>
+                          prev === 'PAUSED' ? 'PLAYING' : 'PAUSED',
+                        )
+                      }
+                      aria-label={gameState === 'PAUSED' ? '再開' : '一時停止'}
+                      className="p-1 rounded-md bg-slate-800/90 border border-slate-700 text-slate-200 hover:border-cyan-400 cursor-pointer"
+                    >
+                      {gameState === 'PAUSED' ? (
+                        <Play className="w-3.5 h-3.5 text-cyan-400" />
+                      ) : (
+                        <Pause className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleOpenSettings}
+                    aria-label="設定を開く"
+                    className="p-1 rounded-md bg-slate-800/90 border border-slate-700 text-slate-100 hover:border-cyan-400 cursor-pointer"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="w-full h-1 bg-slate-800 rounded-xs overflow-hidden mt-1">
+            <div className="w-full h-0.5 bg-slate-800 rounded-xs overflow-hidden mt-1">
               <div
                 className={`h-full transition-[width] duration-100 ${
                   hud.quizMode === 'boss_shield'
@@ -1154,7 +1152,7 @@ export const GameView: React.FC = () => {
               />
             </div>
 
-            <p className="text-[13px] sm:text-[15px] md:text-base font-bold text-slate-50 leading-snug mt-1.5 break-words">
+            <p className="text-[13px] sm:text-[15px] md:text-base font-bold text-slate-50 leading-snug mt-1 break-words">
               {hud.quizQuestionText}
             </p>
 
@@ -1177,14 +1175,12 @@ export const GameView: React.FC = () => {
         </div>
       )}
 
-      {/* Maximized Play Viewport */}
+      {/* Maximized Play Viewport (constant size throughout run — zero zoom/shrink jump) */}
       <div
         className={
           useExternalQuizLayout
             ? 'relative w-full max-w-[calc(100dvh*16/9)] aspect-video flex items-center justify-center shrink-0'
-            : useCompactPriorityQuiz
-              ? 'relative flex-1 min-h-0 w-full flex items-center justify-center'
-              : 'relative w-full h-full flex items-center justify-center'
+            : 'relative w-full h-full flex items-center justify-center'
         }
       >
         <GameCanvas
@@ -1192,7 +1188,8 @@ export const GameView: React.FC = () => {
           settings={settings}
           highScore={highScore}
           previewCourseId={selectedCourse}
-          externalQuizQuestion={useAnyExternalQuiz}
+          externalQuizQuestion={useExternalQuizLayout}
+          hideInternalQuestionBox={useOverlayPriorityQuiz}
           onStateChange={setGameState}
           onHudUpdate={setHud}
           onHighScoreUpdate={setHighScore}
@@ -1302,12 +1299,14 @@ export const GameView: React.FC = () => {
         </div>
       )}
 
-      {/* Overlay Gameplay HUD (when screen has no external vertical margin) */}
-      {gameState !== 'TITLE_MENU' && !useAnyExternalQuiz && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 p-3 md:p-4 bg-gradient-to-b from-slate-950/85 via-slate-950/35 to-transparent">
-          {hudTopContent}
-        </div>
-      )}
+      {/* Overlay Gameplay HUD (when screen has no external vertical margin & quiz overlay isn't active) */}
+      {gameState !== 'TITLE_MENU' &&
+        !useExternalQuizLayout &&
+        !useOverlayPriorityQuiz && (
+          <div className="pointer-events-none absolute inset-x-0 top-0 p-3 md:p-4 bg-gradient-to-b from-slate-950/85 via-slate-950/35 to-transparent">
+            {hudTopContent}
+          </div>
+        )}
 
       {/* External Bottom Area on mobile portrait (keeps thumb area clean & hides bottom-right text during quiz) */}
       {useExternalQuizLayout && (
@@ -1359,7 +1358,7 @@ export const GameView: React.FC = () => {
       )}
 
       {/* Mobile Compact Bottom Bar (overlay mode, suppressed during Quiz Gate so bottom-right text does not show) */}
-      {!useAnyExternalQuiz && gameState === 'PLAYING' && !hud.quizActive && (
+      {!useExternalQuizLayout && gameState === 'PLAYING' && !hud.quizActive && (
         <div className="sm:hidden pointer-events-none absolute inset-x-0 bottom-0 px-3 py-2 flex items-center justify-between gap-3 bg-gradient-to-t from-slate-950/85 to-transparent text-[11px] font-mono">
           <span
             className={`font-semibold tabular-nums whitespace-nowrap ${
@@ -1397,7 +1396,7 @@ export const GameView: React.FC = () => {
       )}
 
       {/* Real-time Auto-Upgrade Banner (overlay mode) */}
-      {!useAnyExternalQuiz && hud.lastUpgradeBanner && gameState === 'PLAYING' && (
+      {!useExternalQuizLayout && hud.lastUpgradeBanner && gameState === 'PLAYING' && (
         <div className="pointer-events-none absolute inset-x-3 bottom-10 sm:bottom-8 flex justify-center z-10">
           <div className="w-fit max-w-full bg-slate-950/90 border border-cyan-400/70 px-4 sm:px-5 py-2 rounded-lg text-center shadow-lg">
             {renderUpgradeBannerContent(hud.lastUpgradeBanner)}

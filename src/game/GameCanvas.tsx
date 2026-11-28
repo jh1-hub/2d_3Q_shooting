@@ -85,8 +85,8 @@ const BOSS_SHIELD_EDGE_X = 740;
 const BOSS_SHIELD_CURVE_DEPTH = 90;
 const BOSS_SHIELD_ACTIVE_DURATION = 0.75;
 const BOSS_SHIELD_FADE_DURATION = 0.45;
-const BOSS_QUIZ_TOPS_INTERNAL = [162, 308, 454, 600] as const;
-const BOSS_QUIZ_HEIGHT_INTERNAL = 76;
+const BOSS_QUIZ_TOPS_INTERNAL = [182, 314, 446, 578] as const;
+const BOSS_QUIZ_HEIGHT_INTERNAL = 78;
 const BOSS_QUIZ_TOPS_EXTERNAL = [44, 212, 380, 548] as const;
 const BOSS_QUIZ_HEIGHT_EXTERNAL = 104;
 const BOSS_QUIZ_STANDOFF_GAP = 180;
@@ -300,6 +300,7 @@ interface GameCanvasProps {
   highScore: number;
   previewCourseId: CourseId;
   externalQuizQuestion?: boolean;
+  hideInternalQuestionBox?: boolean;
   onStateChange: (next: GameState) => void;
   onHudUpdate: (snapshot: HudSnapshot) => void;
   onHighScoreUpdate: (score: number) => void;
@@ -342,6 +343,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   highScore,
   previewCourseId,
   externalQuizQuestion = false,
+  hideInternalQuestionBox = false,
   onStateChange,
   onHudUpdate,
   onHighScoreUpdate,
@@ -357,6 +359,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const highScoreRef = useRef<number>(highScore);
   const previewCourseRef = useRef<CourseId>(previewCourseId);
   const externalQuizRef = useRef<boolean>(externalQuizQuestion);
+  const hideInternalQuestionRef = useRef<boolean>(hideInternalQuestionBox);
   const onRunEndRef = useRef(onRunEnd);
 
   gameStateRef.current = gameState;
@@ -364,6 +367,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   highScoreRef.current = highScore;
   previewCourseRef.current = previewCourseId;
   externalQuizRef.current = externalQuizQuestion;
+  hideInternalQuestionRef.current = hideInternalQuestionBox;
   onRunEndRef.current = onRunEnd;
 
   const simRef = useRef({
@@ -5893,8 +5897,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.restore();
         }
 
-        // 2. Question Banner inside canvas (shown only when there isn't external screen space)
-        if (!isExternalQuiz) {
+        // 2. Question Banner inside canvas (shown only when DOM question banner is inactive)
+        if (!isExternalQuiz && !hideInternalQuestionRef.current) {
           const qBoxX = 80;
           const qBoxY = 82;
           const qBoxW = LOGICAL_W - 160;
@@ -6175,7 +6179,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         }
 
         // Question Banner inside canvas (wide top bar clear of all 4 choices below)
-        if (!isExternalQuiz) {
+        if (!isExternalQuiz && !hideInternalQuestionRef.current) {
           const qBoxX = 48;
           const qBoxY = 66;
           const qBoxW = LOGICAL_W - 96;
