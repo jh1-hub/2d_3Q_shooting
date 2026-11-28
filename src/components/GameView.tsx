@@ -7,6 +7,8 @@ import {
   Download,
   Layers,
   Lock,
+  Maximize2,
+  Minimize2,
   Pause,
   Play,
   RotateCcw,
@@ -71,6 +73,34 @@ function detectMobilePortrait(): boolean {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   return isMobileViewportDevice() && vh > vw && vw < 768;
+}
+
+type FullscreenDocument = Document & {
+  webkitFullscreenEnabled?: boolean;
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+};
+
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+function getFullscreenElement(): Element | null {
+  if (typeof document === 'undefined') return null;
+  const doc = document as FullscreenDocument;
+  return doc.fullscreenElement ?? doc.webkitFullscreenElement ?? null;
+}
+
+function isFullscreenSupported(): boolean {
+  if (typeof document === 'undefined') return false;
+  const doc = document as FullscreenDocument;
+  const root = document.documentElement as FullscreenElement;
+  return Boolean(
+    doc.fullscreenEnabled ||
+      doc.webkitFullscreenEnabled ||
+      root.requestFullscreen ||
+      root.webkitRequestFullscreen,
+  );
 }
 
 function renderPhraseWithNaturalBreaks(phrase: string, keyPrefix: string) {
@@ -246,6 +276,16 @@ export const GameView: React.FC = () => {
   const [isMobilePortrait, setIsMobilePortrait] = useState<boolean>(
     detectMobilePortrait,
   );
+  const [landscapeAutoHint, setLandscapeAutoHint] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(() =>
+    Boolean(getFullscreenElement()),
+  );
+  const [canFullscreen] = useState<boolean>(isFullscreenSupported);
+  const [viewportSize, setViewportSize] = useState<{width: number; height: number}>(() =>
+    typeof window === 'undefined'
+      ? {width: 1280, height: 720}
+      : {width: window.innerWidth, height: window.innerHeight},
+  );
   const [externalQuizRoom, setExternalQuizRoom] = useState<'none' | 'compact' | 'roomy'>(() => {
     if (typeof window === 'undefined') return 'none';
     const vw = window.innerWidth;
@@ -261,15 +301,28 @@ export const GameView: React.FC = () => {
       const vh = window.innerHeight;
       const gameH = Math.min(vh, (vw * 9) / 16);
       const spare = vh - gameH;
+      setViewportSize({width: vw, height: vh});
       setExternalQuizRoom(spare >= 350 ? 'roomy' : spare >= 220 ? 'compact' : 'none');
-      setIsMobilePortrait(detectMobilePortrait());
+      const portrait = detectMobilePortrait();
+      setIsMobilePortrait(portrait);
+      if (!portrait) {
+        setLandscapeAutoHint(false);
+      }
+    };
+    const syncFullscreen = () => {
+      setIsFullscreen(Boolean(getFullscreenElement()));
+      checkRoom();
     };
     checkRoom();
     window.addEventListener('resize', checkRoom);
     window.addEventListener('orientationchange', checkRoom);
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    document.addEventListener('webkitfullscreenchange', syncFullscreen);
     return () => {
       window.removeEventListener('resize', checkRoom);
       window.removeEventListener('orientationchange', checkRoom);
+      document.removeEventListener('fullscreenchange', syncFullscreen);
+      document.removeEventListener('webkitfullscreenchange', syncFullscreen);
     };
   }, []);
 
@@ -450,23 +503,65 @@ export const GameView: React.FC = () => {
     }
   }, []);
 
-  const requestLandscapeMode = useCallback(async () => {
-    if (typeof document !== 'undefined') {
+  const enterImmersiveFullscreen = useCallback(async () => {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement as FullscreenElement;
+    if (!getFullscreenElement()) {
       try {
-        if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
-          await document.documentElement.requestFullscreen();
+        if (root.requestFullscreen) {
+          try {
+            await root.requestFullscreen({navigationUI: 'hide'});
+          } catch {
+            await root.requestFullscreen();
+          }
+        } else if (root.webkitRequestFullscreen) {
+          await root.webkitRequestFullscreen();
         }
       } catch {
         // Ignore fullscreen denial on unsupported browsers (e.g. iOS Safari)
       }
     }
+    setIsFullscreen(Boolean(getFullscreenElement()));
     await tryLockLandscape();
+    try {
+      window.scrollTo(0, 1);
+    } catch {
+      // Ignore scroll nudge error
+    }
   }, [tryLockLandscape]);
+
+  const requestLandscapeMode = useCallback(async () => {
+    await enterImmersiveFullscreen();
+    window.setTimeout(() => {
+      if (detectMobilePortrait()) {
+        setLandscapeAutoHint(true);
+      }
+    }, 350);
+  }, [enterImmersiveFullscreen]);
+
+  const toggleFullscreen = useCallback(async () => {
+    if (typeof document === 'undefined') return;
+    const doc = document as FullscreenDocument;
+    if (getFullscreenElement()) {
+      try {
+        if (doc.exitFullscreen) {
+          await doc.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          await doc.webkitExitFullscreen();
+        }
+      } catch {
+        // Ignore exit errors
+      }
+      setIsFullscreen(Boolean(getFullscreenElement()));
+    } else {
+      await enterImmersiveFullscreen();
+    }
+  }, [enterImmersiveFullscreen]);
 
   const startSelectedRun = useCallback(() => {
     if (bgmManager.getLoadState().status !== 'ready') return;
     if (isMobileViewportDevice()) {
-      void tryLockLandscape();
+      void enterImmersiveFullscreen();
     }
     const effectivePattern = isPatternUnlocked(selectedPattern, progress)
       ? selectedPattern
@@ -483,12 +578,12 @@ export const GameView: React.FC = () => {
       revengeMode,
     );
   }, [
+    enterImmersiveFullscreen,
     progress,
     revengeMode,
     selectedCourse,
     selectedDifficulty,
     selectedPattern,
-    tryLockLandscape,
   ]);
 
   const toggleBgm = () => {
@@ -552,6 +647,17 @@ export const GameView: React.FC = () => {
 
   const useExternalQuizLayout =
     externalQuizRoom !== 'none' && gameState !== 'TITLE_MENU';
+
+  const useCompactPriorityQuiz =
+    !useExternalQuizLayout &&
+    gameState !== 'TITLE_MENU' &&
+    hud.quizActive &&
+    Boolean(hud.quizQuestionText) &&
+    (isMobileViewportDevice() ||
+      viewportSize.height < 640 ||
+      viewportSize.width < 1024);
+
+  const useAnyExternalQuiz = useExternalQuizLayout || useCompactPriorityQuiz;
 
   const quizTimerColor =
     hud.quizTimeRemaining <= 5
@@ -622,8 +728,9 @@ export const GameView: React.FC = () => {
           </div>
         </div>
 
-        {/* Center: Stage / Endless & Auto-Upgrade Meter */}
-        <div className="hidden sm:flex flex-col items-center w-48 md:w-64 lg:w-72">
+        {/* Center: Stage / Endless & Auto-Upgrade Meter (suppressed during quiz overlay so canvas question stays clear) */}
+        {!hud.quizActive && (
+          <div className="hidden sm:flex flex-col items-center w-48 md:w-64 lg:w-72">
           <div className="flex items-center gap-2 text-xs font-mono tabular-nums text-slate-200 mb-1">
             {hud.difficulty === 'hard' && (
               <span className="font-bold text-rose-400">HARD</span>
@@ -679,7 +786,8 @@ export const GameView: React.FC = () => {
           <div className="text-[10px] font-mono text-slate-400 mt-0.5 truncate max-w-full">
             NEXT: {hud.nextUpgradeLabel}
           </div>
-        </div>
+          </div>
+        )}
 
         {/* Right: Score, Combo & Quick Action Icons */}
         <div className="flex items-start gap-2.5 sm:gap-3 shrink-0">
@@ -704,6 +812,24 @@ export const GameView: React.FC = () => {
           </div>
 
           <div className="pointer-events-auto flex items-center gap-1.5 sm:gap-2">
+            {canFullscreen && (
+              <button
+                type="button"
+                onClick={() => {
+                  void toggleFullscreen();
+                }}
+                aria-label={isFullscreen ? '全画面を解除' : '全画面表示'}
+                title={isFullscreen ? '全画面を解除' : '全画面表示（アドレスバーを隠す）'}
+                className="p-2 rounded-lg bg-slate-900/85 border border-slate-700/80 text-slate-200 hover:border-cyan-400 transition-colors cursor-pointer"
+              >
+                {isFullscreen ? (
+                  <Minimize2 className="w-4 h-4 text-cyan-300" />
+                ) : (
+                  <Maximize2 className="w-4 h-4" />
+                )}
+              </button>
+            )}
+
             <button
               type="button"
               onClick={toggleQuickMute}
@@ -770,15 +896,15 @@ export const GameView: React.FC = () => {
 
   return (
     <div
-      className={`relative w-screen h-[100dvh] bg-[#050811] overflow-hidden flex ${
-        useExternalQuizLayout
+      className={`relative w-screen h-[100dvh] bg-[#050811] overflow-hidden flex pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] ${
+        useAnyExternalQuiz
           ? 'flex-col items-center justify-between'
           : 'items-center justify-center'
       } ${gameState === 'PLAYING' ? 'game-touch-surface' : ''} ${
         cursorHidden ? 'hide-cursor' : ''
       }`}
     >
-      {/* External Top HUD & Question Panel when screen has vertical spare room (e.g. mobile portrait) */}
+      {/* External Top HUD & Question Panel when screen has vertical spare room (e.g. tall/portrait window) */}
       {useExternalQuizLayout && (
         <div
           className={`w-full px-3 pt-2.5 pb-1.5 flex flex-col items-center gap-2 shrink-0 z-10 ${
@@ -788,7 +914,7 @@ export const GameView: React.FC = () => {
           {hudTopContent}
 
           {hud.quizActive && hud.quizQuestionText && (
-            <div className="w-full max-w-2xl bg-slate-900/90 border border-cyan-500/45 rounded-xl px-4 py-3 shadow-lg">
+            <div className="w-full max-w-2xl bg-slate-900/90 border border-cyan-500/45 rounded-xl px-4 py-3 shadow-lg max-h-[42dvh] overflow-y-auto">
               <div className="flex items-center justify-between gap-2 text-xs font-mono">
                 <div className="text-cyan-300 font-semibold truncate">
                   {hud.quizMode === 'boss_shield'
@@ -857,7 +983,7 @@ export const GameView: React.FC = () => {
                 />
               </div>
 
-              <p className="text-sm sm:text-base font-bold text-slate-50 leading-snug mt-2">
+              <p className="text-sm sm:text-base font-bold text-slate-50 leading-snug mt-2 break-words">
                 {hud.quizQuestionText}
               </p>
 
@@ -885,12 +1011,180 @@ export const GameView: React.FC = () => {
         </div>
       )}
 
+      {/* Priority Compact Question Header for Mobile Landscape & Short Viewports */}
+      {useCompactPriorityQuiz && (
+        <div className="w-full px-2.5 sm:px-4 pt-1.5 pb-1 shrink-0 z-20">
+          <div className="w-full max-w-4xl mx-auto bg-slate-900/95 border border-cyan-500/50 rounded-xl px-3 py-2 shadow-lg max-h-[44dvh] overflow-y-auto">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0 text-[11px] font-mono">
+                <span
+                  className={`inline-flex items-center gap-1 font-semibold whitespace-nowrap ${
+                    hud.shield === 0 ? 'text-rose-400' : 'text-sky-300'
+                  }`}
+                >
+                  <Shield className="w-3 h-3" />
+                  {hud.shield}/{hud.maxShield}
+                </span>
+                <span className="text-slate-600">|</span>
+                <span className="text-cyan-300 font-semibold truncate">
+                  {hud.quizMode === 'boss_shield'
+                    ? `BOSS QUIZ #${hud.bossQuizNumber}`
+                    : `QUIZ · ${hud.quizQuestionCategory}`}
+                </span>
+                {hud.quizMode === 'boss_shield' && (
+                  <span className="text-slate-400 truncate hidden sm:inline">
+                    {hud.quizQuestionCategory}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                {hud.quizMode === 'boss_shield' ? (
+                  <span
+                    className={`font-mono text-[11px] font-bold tabular-nums whitespace-nowrap ${
+                      hud.quizResult === 'correct'
+                        ? 'text-emerald-300'
+                        : hud.quizResult === 'wrong' || hud.quizResult === 'timeout'
+                          ? 'text-rose-400'
+                          : hud.quizTimeRemaining <= 8
+                            ? 'text-rose-400'
+                            : hud.quizTimeRemaining <= 18
+                              ? 'text-amber-300'
+                              : 'text-emerald-300'
+                    }`}
+                  >
+                    {hud.quizResult === 'none'
+                      ? `NORMAL SHOT で破壊 · ${Math.ceil(hud.quizTimeRemaining).toString().padStart(2, '0')}s`
+                      : hud.quizResult === 'correct'
+                        ? 'SHIELD SHATTERED!'
+                        : `${hud.quizResult === 'timeout' ? 'TIME UP' : 'MISS'} (${Math.max(1, Math.ceil(hud.quizFeedbackRemaining))}s)`}
+                  </span>
+                ) : (
+                  <span className={`font-mono text-[11px] font-bold tabular-nums whitespace-nowrap ${quizTimerColor}`}>
+                    {hud.quizResult === 'none'
+                      ? `TIME ${Math.ceil(hud.quizTimeRemaining).toString().padStart(2, '0')}s`
+                      : hud.quizResult === 'correct'
+                        ? `正解 (${Math.max(1, Math.ceil(hud.quizFeedbackRemaining))}s)`
+                        : `移動まで ${Math.max(1, Math.ceil(hud.quizFeedbackRemaining))}s`}
+                  </span>
+                )}
+
+                {canFullscreen && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void toggleFullscreen();
+                    }}
+                    aria-label={isFullscreen ? '全画面を解除' : '全画面表示'}
+                    className="p-1.5 rounded-md bg-slate-800/90 border border-slate-700 text-slate-200 hover:border-cyan-400 cursor-pointer"
+                  >
+                    {isFullscreen ? (
+                      <Minimize2 className="w-3.5 h-3.5 text-cyan-300" />
+                    ) : (
+                      <Maximize2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={toggleQuickMute}
+                  aria-label={anyAudioEnabled ? 'ミュート' : 'サウンド有効化'}
+                  className="p-1.5 rounded-md bg-slate-800/90 border border-slate-700 text-slate-200 hover:border-cyan-400 cursor-pointer"
+                >
+                  {anyAudioEnabled ? (
+                    <Volume2 className="w-3.5 h-3.5" />
+                  ) : (
+                    <VolumeX className="w-3.5 h-3.5 text-slate-500" />
+                  )}
+                </button>
+
+                {gameState !== 'GAME_OVER' && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setGameState((prev) =>
+                        prev === 'PAUSED' ? 'PLAYING' : 'PAUSED',
+                      )
+                    }
+                    aria-label={gameState === 'PAUSED' ? '再開' : '一時停止'}
+                    className="p-1.5 rounded-md bg-slate-800/90 border border-slate-700 text-slate-200 hover:border-cyan-400 cursor-pointer"
+                  >
+                    {gameState === 'PAUSED' ? (
+                      <Play className="w-3.5 h-3.5 text-cyan-400" />
+                    ) : (
+                      <Pause className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleOpenSettings}
+                  aria-label="設定を開く"
+                  className="p-1.5 rounded-md bg-slate-800/90 border border-slate-700 text-slate-100 hover:border-cyan-400 cursor-pointer"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="w-full h-1 bg-slate-800 rounded-xs overflow-hidden mt-1">
+              <div
+                className={`h-full transition-[width] duration-100 ${
+                  hud.quizMode === 'boss_shield'
+                    ? hud.quizTimeRemaining <= 8
+                      ? 'bg-rose-500'
+                      : hud.quizTimeRemaining <= 18
+                        ? 'bg-amber-400'
+                        : 'bg-emerald-400'
+                    : quizBarColor
+                }`}
+                style={{
+                  width: `${Math.max(
+                    0,
+                    Math.min(
+                      100,
+                      (hud.quizTimeRemaining /
+                        (hud.quizMode === 'boss_shield' ? 60 : 30)) *
+                        100,
+                    ),
+                  )}%`,
+                }}
+              />
+            </div>
+
+            <p className="text-[13px] sm:text-[15px] md:text-base font-bold text-slate-50 leading-snug mt-1.5 break-words">
+              {hud.quizQuestionText}
+            </p>
+
+            {hud.quizResult !== 'none' && (
+              <div
+                className={`mt-1 text-xs font-semibold ${
+                  hud.quizResult === 'correct' ? 'text-emerald-300' : 'text-rose-300'
+                }`}
+              >
+                {hud.quizMode === 'boss_shield'
+                  ? hud.quizResult === 'correct'
+                    ? '正解！ シールド破壊 — ボス本体へ攻撃可能！'
+                    : `${hud.quizResult === 'timeout' ? 'TIME UP！' : '不正解…'} 正解: ${hud.quizCorrectLabel}（${hud.quizCorrectChoiceText}）`
+                  : hud.quizResult === 'correct'
+                    ? '正解！ アイテム出現あり — エリア突入！'
+                    : `${hud.quizResult === 'timeout' ? 'TIME UP！' : '不正解…'} 正解: ${hud.quizCorrectLabel}（${hud.quizCorrectChoiceText}）`}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Maximized Play Viewport */}
       <div
         className={
           useExternalQuizLayout
             ? 'relative w-full max-w-[calc(100dvh*16/9)] aspect-video flex items-center justify-center shrink-0'
-            : 'relative w-full h-full flex items-center justify-center'
+            : useCompactPriorityQuiz
+              ? 'relative flex-1 min-h-0 w-full flex items-center justify-center'
+              : 'relative w-full h-full flex items-center justify-center'
         }
       >
         <GameCanvas
@@ -898,7 +1192,7 @@ export const GameView: React.FC = () => {
           settings={settings}
           highScore={highScore}
           previewCourseId={selectedCourse}
-          externalQuizQuestion={useExternalQuizLayout}
+          externalQuizQuestion={useAnyExternalQuiz}
           onStateChange={setGameState}
           onHudUpdate={setHud}
           onHighScoreUpdate={setHighScore}
@@ -939,6 +1233,24 @@ export const GameView: React.FC = () => {
               {progress.solvedTermIds.length}/{TOTAL_QUIZ_TERM_COUNT}
             </span>
           </button>
+
+          {canFullscreen && (
+            <button
+              type="button"
+              onClick={() => {
+                void toggleFullscreen();
+              }}
+              aria-label={isFullscreen ? '全画面を解除' : '全画面表示'}
+              title={isFullscreen ? '全画面を解除' : '全画面表示（アドレスバーを隠す）'}
+              className="p-2.5 rounded-lg bg-slate-900/85 border border-slate-700/80 text-slate-200 hover:border-cyan-400 transition-colors inline-flex items-center justify-center shrink-0 cursor-pointer"
+            >
+              {isFullscreen ? (
+                <Minimize2 className="w-4 h-4 text-cyan-300" />
+              ) : (
+                <Maximize2 className="w-4 h-4" />
+              )}
+            </button>
+          )}
 
           {isInstalled ? (
             <span
@@ -991,7 +1303,7 @@ export const GameView: React.FC = () => {
       )}
 
       {/* Overlay Gameplay HUD (when screen has no external vertical margin) */}
-      {gameState !== 'TITLE_MENU' && !useExternalQuizLayout && (
+      {gameState !== 'TITLE_MENU' && !useAnyExternalQuiz && (
         <div className="pointer-events-none absolute inset-x-0 top-0 p-3 md:p-4 bg-gradient-to-b from-slate-950/85 via-slate-950/35 to-transparent">
           {hudTopContent}
         </div>
@@ -1047,7 +1359,7 @@ export const GameView: React.FC = () => {
       )}
 
       {/* Mobile Compact Bottom Bar (overlay mode, suppressed during Quiz Gate so bottom-right text does not show) */}
-      {!useExternalQuizLayout && gameState === 'PLAYING' && !hud.quizActive && (
+      {!useAnyExternalQuiz && gameState === 'PLAYING' && !hud.quizActive && (
         <div className="sm:hidden pointer-events-none absolute inset-x-0 bottom-0 px-3 py-2 flex items-center justify-between gap-3 bg-gradient-to-t from-slate-950/85 to-transparent text-[11px] font-mono">
           <span
             className={`font-semibold tabular-nums whitespace-nowrap ${
@@ -1085,7 +1397,7 @@ export const GameView: React.FC = () => {
       )}
 
       {/* Real-time Auto-Upgrade Banner (overlay mode) */}
-      {!useExternalQuizLayout && hud.lastUpgradeBanner && gameState === 'PLAYING' && (
+      {!useAnyExternalQuiz && hud.lastUpgradeBanner && gameState === 'PLAYING' && (
         <div className="pointer-events-none absolute inset-x-3 bottom-10 sm:bottom-8 flex justify-center z-10">
           <div className="w-fit max-w-full bg-slate-950/90 border border-cyan-400/70 px-4 sm:px-5 py-2 rounded-lg text-center shadow-lg">
             {renderUpgradeBannerContent(hud.lastUpgradeBanner)}
@@ -2072,8 +2384,15 @@ export const GameView: React.FC = () => {
               className="w-full py-2.5 px-4 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-bold text-xs tracking-wide transition-colors cursor-pointer flex items-center justify-center gap-2"
             >
               <RotateCw className="w-4 h-4" />
-              <span>横画面に切り替える</span>
+              <span>全画面・横画面に切り替える</span>
             </button>
+            {landscapeAutoHint && (
+              <p className="text-[11px] text-amber-300 leading-relaxed">
+                {isIOS
+                  ? 'iOS Safariでは自動回転が制限されています。端末の回転ロックを解除して横に傾けるか、共有メニューから「ホーム画面に追加」をお試しください。'
+                  : '自動で切り替わらない場合は、端末の画面回転を有効にして横に傾けてください。'}
+              </p>
+            )}
           </div>
         </div>
       )}

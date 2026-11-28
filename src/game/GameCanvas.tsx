@@ -1421,6 +1421,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       // 既存の誤射を防ぐため、Normal以外の前方弾をクリア
       s.bullets = s.bullets.filter((b) => b.isBaseNormal);
       synthAudio.playWarning();
+      emitHudNow();
     };
 
     const damagePlayer = () => {
@@ -2060,6 +2061,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       s.quizBoostTimer = 0;
       s.quizSelectedGate = null;
       s.quizResult = 'none';
+      emitHudNow();
     };
 
     const advanceStage = () => {
@@ -2511,6 +2513,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             s.spawnTimer = 0.55;
             s.itemTimer = 1.3;
             p.invulnTimer = 1.0;
+            emitHudNow();
           }
         }
 
@@ -3562,6 +3565,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
               boss.quizNoHitTimers = [0, 0, 0, 0];
               boss.fireTimer = Math.max(boss.fireTimer, 0.75);
               boss.subFireTimer = Math.max(boss.subFireTimer, 1.0);
+              emitHudNow();
             }
           }
 
@@ -5863,15 +5867,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.fillText(GATE_LABELS[i], GATE_CARD_X + 31, cy + 7);
 
           ctx.font = isExternalQuiz
-            ? '700 21px "Plus Jakarta Sans", sans-serif'
+            ? '700 23px "Plus Jakarta Sans", sans-serif'
             : '700 18px "Plus Jakarta Sans", sans-serif';
           ctx.textAlign = 'left';
           ctx.fillStyle =
             isFeedback && !isCorrectChoice && !isSelected ? '#94A3B8' : '#F8FAFC';
-          const cLines = wrapCanvasText(ctx, q.choices[i], GATE_CARD_WIDTH - 76);
-          const lineStep = isExternalQuiz ? 25 : 22;
-          const startY = cLines.length > 1 ? cy - 4 : cy + 7;
-          cLines.slice(0, 2).forEach((line, lIdx) => {
+          let cLines = wrapCanvasText(ctx, q.choices[i], GATE_CARD_WIDTH - 76);
+          let lineStep = isExternalQuiz ? 26 : 22;
+          if (cLines.length > 2) {
+            ctx.font = isExternalQuiz
+              ? '700 18px "Plus Jakarta Sans", sans-serif'
+              : '700 15px "Plus Jakarta Sans", sans-serif';
+            cLines = wrapCanvasText(ctx, q.choices[i], GATE_CARD_WIDTH - 76);
+            lineStep = isExternalQuiz ? 21 : 17;
+          }
+          const startY =
+            cLines.length >= 3
+              ? cy - lineStep + 6
+              : cLines.length === 2
+                ? cy - 4
+                : cy + 7;
+          cLines.forEach((line, lIdx) => {
             ctx.fillText(line, GATE_CARD_X + 60, startY + lIdx * lineStep);
           });
           ctx.restore();
@@ -5880,9 +5896,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         // 2. Question Banner inside canvas (shown only when there isn't external screen space)
         if (!isExternalQuiz) {
           const qBoxX = 80;
-          const qBoxY = 88;
+          const qBoxY = 82;
           const qBoxW = LOGICAL_W - 160;
-          const qBoxH = 92;
+
+          ctx.font = '700 20px "Plus Jakarta Sans", sans-serif';
+          let qLines = wrapCanvasText(ctx, q.question, qBoxW - 36);
+          let qLineStep = 23;
+          let qTopPad = 59;
+          if (qLines.length > 2) {
+            ctx.font = '700 16px "Plus Jakarta Sans", sans-serif';
+            qLines = wrapCanvasText(ctx, q.question, qBoxW - 36);
+            qLineStep = 19;
+            qTopPad = 53;
+            if (qLines.length > 3) {
+              ctx.font = '700 14px "Plus Jakarta Sans", sans-serif';
+              qLines = wrapCanvasText(ctx, q.question, qBoxW - 36);
+              qLineStep = 17;
+              qTopPad = 50;
+            }
+          }
+          const qFontSpec = ctx.font;
+          const qBoxH = Math.max(92, qTopPad + (qLines.length - 1) * qLineStep + 14);
 
           ctx.fillStyle = 'rgba(7, 11, 20, 0.94)';
           ctx.strokeStyle = 'rgba(34, 211, 238, 0.65)';
@@ -5925,21 +5959,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           ctx.fillStyle = timerColor;
           ctx.fillRect(barX, barY, barW * timeRatio, 5);
 
-          ctx.font = '700 20px "Plus Jakarta Sans", sans-serif';
+          ctx.font = qFontSpec;
           ctx.textAlign = 'left';
           ctx.fillStyle = '#F8FAFC';
-          let qLines = wrapCanvasText(ctx, q.question, qBoxW - 36);
-          if (qLines.length > 2) {
-            ctx.font = '700 16px "Plus Jakarta Sans", sans-serif';
-            qLines = wrapCanvasText(ctx, q.question, qBoxW - 36);
-            qLines.slice(0, 3).forEach((line, lIdx) => {
-              ctx.fillText(line, qBoxX + 18, qBoxY + 53 + lIdx * 18);
-            });
-          } else {
-            qLines.forEach((line, lIdx) => {
-              ctx.fillText(line, qBoxX + 18, qBoxY + 59 + lIdx * 23);
-            });
-          }
+          qLines.forEach((line, lIdx) => {
+            ctx.fillText(line, qBoxX + 18, qBoxY + qTopPad + lIdx * qLineStep);
+          });
         }
 
         ctx.restore();
@@ -6110,15 +6135,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
           // Choice Text (larger font with ~550px width)
           ctx.font = isExternalQuiz
-            ? '700 22px "Plus Jakarta Sans", sans-serif'
+            ? '700 23px "Plus Jakarta Sans", sans-serif'
             : '700 19px "Plus Jakarta Sans", sans-serif';
           ctx.textAlign = 'left';
           ctx.fillStyle =
             isFeedback && !isCorrectChoice && !isSelected ? '#94A3B8' : '#F8FAFC';
-          const cLines = wrapCanvasText(ctx, q.choices[i], cardW - 72);
-          const lineStep = isExternalQuiz ? 26 : 22;
-          const startY = cLines.length > 1 ? cy - 5 : cy + 6;
-          cLines.slice(0, 2).forEach((line, lIdx) => {
+          let cLines = wrapCanvasText(ctx, q.choices[i], cardW - 72);
+          let lineStep = isExternalQuiz ? 26 : 22;
+          if (cLines.length > 2) {
+            ctx.font = isExternalQuiz
+              ? '700 18px "Plus Jakarta Sans", sans-serif'
+              : '700 15px "Plus Jakarta Sans", sans-serif';
+            cLines = wrapCanvasText(ctx, q.choices[i], cardW - 72);
+            lineStep = isExternalQuiz ? 20 : 17;
+          }
+          const startY =
+            cLines.length >= 3
+              ? cy - lineStep + 5
+              : cLines.length === 2
+                ? cy - 5
+                : cy + 6;
+          cLines.forEach((line, lIdx) => {
             ctx.fillText(line, cardX + 58, startY + lIdx * lineStep);
           });
 
@@ -6142,7 +6179,25 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           const qBoxX = 48;
           const qBoxY = 66;
           const qBoxW = LOGICAL_W - 96;
-          const qBoxH = 82;
+
+          ctx.font = '700 20px "Plus Jakarta Sans", sans-serif';
+          let qLines = wrapCanvasText(ctx, q.question, qBoxW - 32);
+          let qLineStep = 22;
+          let qTopPad = 53;
+          if (qLines.length > 2) {
+            ctx.font = '700 16px "Plus Jakarta Sans", sans-serif';
+            qLines = wrapCanvasText(ctx, q.question, qBoxW - 32);
+            qLineStep = 18;
+            qTopPad = 48;
+            if (qLines.length > 3) {
+              ctx.font = '700 14px "Plus Jakarta Sans", sans-serif';
+              qLines = wrapCanvasText(ctx, q.question, qBoxW - 32);
+              qLineStep = 16;
+              qTopPad = 46;
+            }
+          }
+          const qFontSpec = ctx.font;
+          const qBoxH = Math.max(82, qTopPad + (qLines.length - 1) * qLineStep + 12);
 
           ctx.fillStyle = 'rgba(7, 11, 20, 0.95)';
           ctx.strokeStyle =
@@ -6201,21 +6256,12 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
             : timerColor;
           ctx.fillRect(tBarX, tBarY, tBarW * (isFeedback ? 1 : timeRatio), 4);
 
-          ctx.font = '700 20px "Plus Jakarta Sans", sans-serif';
+          ctx.font = qFontSpec;
           ctx.textAlign = 'left';
           ctx.fillStyle = '#F8FAFC';
-          let qLines = wrapCanvasText(ctx, q.question, qBoxW - 32);
-          if (qLines.length > 2) {
-            ctx.font = '700 16px "Plus Jakarta Sans", sans-serif';
-            qLines = wrapCanvasText(ctx, q.question, qBoxW - 32);
-            qLines.slice(0, 3).forEach((line, lIdx) => {
-              ctx.fillText(line, qBoxX + 16, qBoxY + 47 + lIdx * 17);
-            });
-          } else {
-            qLines.forEach((line, lIdx) => {
-              ctx.fillText(line, qBoxX + 16, qBoxY + 53 + lIdx * 22);
-            });
-          }
+          qLines.forEach((line, lIdx) => {
+            ctx.fillText(line, qBoxX + 16, qBoxY + qTopPad + lIdx * qLineStep);
+          });
         }
 
         ctx.restore();

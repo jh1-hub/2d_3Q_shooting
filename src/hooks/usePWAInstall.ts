@@ -19,6 +19,7 @@ export function usePWAInstall() {
     if (typeof window === 'undefined') return;
     const checkStandalone = () =>
       window.matchMedia('(display-mode: standalone)').matches ||
+      window.matchMedia('(display-mode: fullscreen)').matches ||
       (window.navigator as unknown as {standalone?: boolean}).standalone === true;
 
     if (checkStandalone()) {
@@ -35,7 +36,8 @@ export function usePWAInstall() {
       setDeferredPrompt(null);
     };
 
-    const mediaQuery = window.matchMedia('(display-mode: standalone)');
+    const standaloneQuery = window.matchMedia('(display-mode: standalone)');
+    const fullscreenPwaQuery = window.matchMedia('(display-mode: fullscreen)');
     const handleDisplayModeChange = (e: MediaQueryListEvent) => {
       if (e.matches) {
         setIsInstalled(true);
@@ -45,7 +47,8 @@ export function usePWAInstall() {
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
-    mediaQuery.addEventListener('change', handleDisplayModeChange);
+    standaloneQuery.addEventListener('change', handleDisplayModeChange);
+    fullscreenPwaQuery.addEventListener('change', handleDisplayModeChange);
 
     return () => {
       window.removeEventListener(
@@ -53,7 +56,8 @@ export function usePWAInstall() {
         handleBeforeInstallPrompt,
       );
       window.removeEventListener('appinstalled', handleAppInstalled);
-      mediaQuery.removeEventListener('change', handleDisplayModeChange);
+      standaloneQuery.removeEventListener('change', handleDisplayModeChange);
+      fullscreenPwaQuery.removeEventListener('change', handleDisplayModeChange);
     };
   }, []);
 
